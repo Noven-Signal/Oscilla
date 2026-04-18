@@ -39,6 +39,9 @@ pub enum Event {
     Render,
     FocusGained,
     FocusLost,
+    Suspend,
+    Resume,
+    ClearScreen,
     Paste(String),
     FileDrop(String),
     Key(KeyEvent),
@@ -123,17 +126,13 @@ impl Tui {
             .send(Event::Init)
             .expect("failed to send init event");
 
-        let mut stdout = io::stdout();
-        // Enable the feature
-        execute!(stdout, EnableBracketedPaste);
-
         loop {
             let event = tokio::select! {
                 _ = cancellation_token.cancelled() => {
                     break;
                 }
-                _ = tick_interval.tick() => Event::Tick,
-                _ = render_interval.tick() => Event::Render,
+                // _ = tick_interval.tick() => Event::Tick,
+                // _ = render_interval.tick() => Event::Render,
                 crossterm_event = event_stream.next().fuse() => match crossterm_event {
                     Some(Ok(event)) => match event {
                         CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => Event::Key(key),
@@ -143,18 +142,6 @@ impl Tui {
                         CrosstermEvent::FocusGained => Event::FocusGained,
                         CrosstermEvent::Paste(s) => {
                             Event::FileDrop(s)
-                            // // Check if pasted content is a file path (from drag-drop or direct paste)
-                            // if s.starts_with("file://") {
-                            //     // Remove file:// prefix and URL decode
-                            //     let path = s.strip_prefix("file://").unwrap_or(&s);
-                            //     let path = urlencoding::decode(path).unwrap_or(std::borrow::Cow::Borrowed(path));
-                            //     Event::FileDrop(path.to_string())
-                            // } else if std::path::Path::new(&s).exists() {
-                            //     // If the pasted string is an existing path, treat it as file drop
-                            //     Event::FileDrop(s)
-                            // } else {
-                            //     Event::Paste(s)
-                            // }
                         },
                         _ => continue, // ignore other events
                     }

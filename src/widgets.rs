@@ -5,3 +5,4 @@ pub mod EffectArea;
 pub mod ButtonArea;
 pub mod VolArea;
 pub mod MyDefMacro;
+pub mod AppRoot;

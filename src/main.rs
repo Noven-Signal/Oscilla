@@ -1,7 +1,7 @@
 use clap::Parser;
 use cli::Cli;
 
-use crate::app::App;
+use crate::{app::App, widgets::AppRoot};
 
 mod action;
 mod app;
@@ -24,7 +24,7 @@ async fn main() -> color_eyre::Result<()> {
     AppState::AppState::init();
 
     let args = Cli::parse();
-    let mut app = App::new(args.tick_rate, args.frame_rate)?;
+    let mut app = App::new(AppRoot::AppRoot::default())?;
     app.run().await?;
     Ok(())
 }

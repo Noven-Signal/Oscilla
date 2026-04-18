@@ -2,8 +2,8 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, LineGauge, Widget};
 
 use crate::AppState::AppState::{TabState, Tabs, focus_state};
-use crate::components::home::{RectExtension, SelectedBlock};
 use crate::extensions::OnceLock::OnceLock_ext;
+use crate::extensions::Rect::RectExtension;
 use crate::get_decorated_border;
 use crate::widgets::ButtonArea::ButtonsArea;
 use crate::widgets::VolArea::VolArea;

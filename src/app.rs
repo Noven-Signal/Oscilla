@@ -1,5 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::{layout::Direction, prelude::Rect, widgets::Tabs};
+use ratatui::{
+    layout::Direction,
+    prelude::Rect,
+    widgets::{Tabs, Widget},
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tokio::sync::{mpsc, watch::error};
@@ -8,7 +12,7 @@ use tracing::{debug, info};
 use crate::{
     AppState,
     action::Action,
-    components::{Component, fps::FpsCounter, home::Home},
+    components::{Component, fps::FpsCounter},
     config::Config,
     extensions::OnceLock::OnceLock_ext,
     tui::{Event, Tui},
@@ -18,17 +22,16 @@ use crate::{
     },
 };
 
-pub struct App {
+pub struct App<T: Widget + Copy> {
     config: Config,
-    tick_rate: f64,
-    frame_rate: f64,
-    components: [Box<dyn Component>; 1],
+    root_wiget: T,
     should_quit: bool,
     should_suspend: bool,
     mode: Mode,
     last_tick_key_events: Vec<KeyEvent>,
     action_tx: mpsc::UnboundedSender<Action>,
     action_rx: mpsc::UnboundedReceiver<Action>,
+    tui: Tui,
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -37,13 +40,12 @@ pub enum Mode {
     Home,
 }
 
-impl App {
-    pub fn new(tick_rate: f64, frame_rate: f64) -> color_eyre::Result<Self> {
+impl<T: Widget + Copy> App<T> {
+    pub fn new(root_wiget: T) -> color_eyre::Result<Self> {
         let (action_tx, action_rx) = mpsc::unbounded_channel();
         Ok(Self {
-            tick_rate,
-            frame_rate,
-            components: [Box::new(Home::new())],
+            tui: Tui::new()?.mouse(true).paste(true),
+            root_wiget: root_wiget,
             should_quit: false,
             should_suspend: false,
             config: Config::new()?,
@@ -55,64 +57,24 @@ impl App {
     }
 
     pub async fn run(&mut self) -> color_eyre::Result<()> {
-        let mut tui = Tui::new()?
-            .mouse(true) // Enable mouse support for drag and drop
-            .paste(true) // Enable paste support
-            .tick_rate(self.tick_rate)
-            .frame_rate(self.frame_rate);
-        tui.enter()?;
-
-        for component in self.components.iter_mut() {
-            component.register_action_handler(self.action_tx.clone())?;
-        }
-        for component in self.components.iter_mut() {
-            component.register_config_handler(self.config.clone())?;
-        }
-        for component in self.components.iter_mut() {
-            component.init(tui.size()?)?;
-        }
+        self.tui.enter()?;
 
         let action_tx = self.action_tx.clone();
         loop {
-            self.handle_events(&mut tui).await?;
-            self.handle_actions(&mut tui)?;
+            // self.handle_events(&mut tui).await?;
+            self.handle_actions().await?;
             if self.should_suspend {
-                tui.suspend()?;
+                self.tui.suspend()?;
                 action_tx.send(Action::Resume)?;
                 action_tx.send(Action::ClearScreen)?;
                 // tui.mouse(true);
-                tui.enter()?;
+                self.tui.enter()?;
             } else if self.should_quit {
-                tui.stop()?;
+                self.tui.stop()?;
                 break;
             }
         }
-        tui.exit()?;
-        Ok(())
-    }
-
-    async fn handle_events(&mut self, tui: &mut Tui) -> color_eyre::Result<()> {
-        let Some(event) = tui.next_event().await else {
-            return Ok(());
-        };
-        let action_tx = self.action_tx.clone();
-        match &event {
-            Event::Quit => action_tx.send(Action::Quit)?,
-            Event::Tick => action_tx.send(Action::Tick)?,
-            Event::Render => action_tx.send(Action::Render)?,
-            Event::Resize(x, y) => action_tx.send(Action::Resize(*x, *y))?,
-            Event::Key(key) => self.handle_key_event(*key)?,
-            Event::FileDrop(path) => {
-                info!("File dropped: {}", path);
-                action_tx.send(Action::FileDropped(path.clone()))?;
-            }
-            _ => {}
-        }
-        for component in self.components.iter_mut() {
-            if let Some(action) = component.handle_events(Some(event.clone()))? {
-                action_tx.send(action)?;
-            }
-        }
+        self.tui.exit()?;
         Ok(())
     }
 
@@ -142,6 +104,14 @@ impl App {
         };
 
         match key {
+            KeyEvent {
+                code: KeyCode::Char('d'),
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => {
+                let _ = self.tui.event_tx.send(Event::Quit);
+            }
             KeyEvent {
                 code,
                 kind: KeyEventKind::Press,
@@ -173,70 +143,48 @@ impl App {
             _ => {}
         };
 
-        match keymap.get(&vec![key]) {
-            Some(action) => {
-                info!("Got action: {action:?}");
-                action_tx.send(action.clone())?;
-            }
-            _ => {
-                // If the key was not handled as a single key action,
-                // then consider it for multi-key combinations.
-                self.last_tick_key_events.push(key);
+        self.render()?;
+        Ok(())
+    }
 
-                // Check for multi-key combinations
-                if let Some(action) = keymap.get(&self.last_tick_key_events) {
-                    info!("Got action: {action:?}");
-                    action_tx.send(action.clone())?;
-                }
+    async fn handle_actions(&mut self) -> color_eyre::Result<()> {
+        let Some(event) = self.tui.next_event().await else {
+            return Ok(());
+        };
+        let action_tx = self.action_tx.clone();
+        match &event {
+            Event::Tick => {
+                self.last_tick_key_events.drain(..);
             }
+            Event::Quit => self.should_quit = true,
+            Event::Key(key) => self.handle_key_event(*key)?,
+            Event::Suspend => self.should_suspend = true,
+            Event::Resume => self.should_suspend = false,
+            Event::ClearScreen => self.tui.terminal.clear()?,
+            Event::Resize(w, h) => self.handle_resize(*w, *h)?,
+            Event::Render => self.render()?,
+            // Event::FileDropped(_) => {
+            //     // Pass file drop events to components
+            // }
+            _ => {}
         }
         Ok(())
     }
 
-    fn handle_actions(&mut self, tui: &mut Tui) -> color_eyre::Result<()> {
-        while let Ok(action) = self.action_rx.try_recv() {
-            if action != Action::Tick && action != Action::Render {
-                debug!("{action:?}");
-            }
-            match action {
-                Action::Tick => {
-                    self.last_tick_key_events.drain(..);
-                }
-                Action::Quit => self.should_quit = true,
-                Action::Suspend => self.should_suspend = true,
-                Action::Resume => self.should_suspend = false,
-                Action::ClearScreen => tui.terminal.clear()?,
-                Action::Resize(w, h) => self.handle_resize(tui, w, h)?,
-                Action::Render => self.render(tui)?,
-                Action::FileDropped(_) => {
-                    // Pass file drop events to components
-                }
-                _ => {}
-            }
-            for component in self.components.iter_mut() {
-                if let Some(action) = component.update(action.clone())? {
-                    self.action_tx.send(action)?
-                };
-            }
-        }
+    fn handle_resize(&mut self, w: u16, h: u16) -> color_eyre::Result<()> {
+        self.tui.resize(Rect::new(0, 0, w, h))?;
+        self.render()?;
         Ok(())
     }
 
-    fn handle_resize(&mut self, tui: &mut Tui, w: u16, h: u16) -> color_eyre::Result<()> {
-        tui.resize(Rect::new(0, 0, w, h))?;
-        self.render(tui)?;
-        Ok(())
+    fn render(&mut self) -> color_eyre::Result<()> {
+       self.partial_render(self.root_wiget)
     }
 
-    fn render(&mut self, tui: &mut Tui) -> color_eyre::Result<()> {
-        tui.draw(|frame| {
-            for component in self.components.iter_mut() {
-                if let Err(err) = component.draw(frame, frame.area()) {
-                    let _ = self
-                        .action_tx
-                        .send(Action::Error(format!("Failed to draw: {:?}", err)));
-                }
-            }
+    fn partial_render(&mut self, reder_wiget:impl Widget) -> color_eyre::Result<()> {
+        self.tui.draw(|frame| {
+            //self.root_wiget.render(frame.area(), frame.buffer_mut());
+            frame.render_widget(reder_wiget, frame.area());
         })?;
         Ok(())
     }

@@ -1,3 +1,4 @@
+use crate::extensions::Rect::RectExtension;
 use crate::get_decorated_border;
 use crate::widgets::Button::ButtonState;
 use crossterm::event::KeyCode;
@@ -6,7 +7,6 @@ use ratatui::widgets::{Block, LineGauge};
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use crate::AppState::AppState::{AreaHandler, TabState, Tabs, button_focus_state, focus_state};
-use crate::components::home::{RectExtension, SelectedBlock};
 use crate::extensions::OnceLock::OnceLock_ext;
 
 use crate::widgets::Button::{Button, ButtonIdent};
@@ -18,7 +18,6 @@ impl Widget for ButtonsArea {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let focus_state_mutex = focus_state.get_mutex_guard();
         let button_focus_state_mutex = button_focus_state.get_mutex_guard();
-
 
         get_decorated_border!(focus_state_mutex,Tabs::ButtonsArea).render(area, buf);
 
