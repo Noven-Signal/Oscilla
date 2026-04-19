@@ -11,6 +11,7 @@ pub mod AppState {
     use crossterm::event::KeyCode;
     use futures::future::ok;
 
+    use crate::AppState;
     use crate::extensions::OnceLock::OnceLock_ext;
     use crate::widgets::Button::ButtonIdent;
     use crate::widgets::ButtonArea;
@@ -156,10 +157,14 @@ pub mod AppState {
 
     pub static vol_state: AtomicU16 = AtomicU16::new(100);
 
-    pub fn init() {
+    pub static play_list: OLM<Vec<String>> = OnceLock::new();
+
+    pub fn init(list: Vec<String>) {
         focus_state.get_or_init(|| Mutex::new(TabState::None));
         button_focus_state.get_or_init(|| Mutex::new(ButtonIdent::Play));
 
         button_handler_func_dic.get_or_init(|| Mutex::new(ButtonIdentToHandler::new()));
+
+        play_list.get_or_init(|| Mutex::new(list));
     }
 }

@@ -23,14 +23,9 @@ use crate::{
 };
 
 pub struct App<T: Widget + Copy> {
-    config: Config,
     root_wiget: T,
     should_quit: bool,
     should_suspend: bool,
-    mode: Mode,
-    last_tick_key_events: Vec<KeyEvent>,
-    action_tx: mpsc::UnboundedSender<Action>,
-    action_rx: mpsc::UnboundedReceiver<Action>,
     tui: Tui,
 }
 
@@ -42,31 +37,21 @@ pub enum Mode {
 
 impl<T: Widget + Copy> App<T> {
     pub fn new(root_wiget: T) -> color_eyre::Result<Self> {
-        let (action_tx, action_rx) = mpsc::unbounded_channel();
         Ok(Self {
             tui: Tui::new()?.mouse(true).paste(true),
             root_wiget: root_wiget,
             should_quit: false,
             should_suspend: false,
-            config: Config::new()?,
-            mode: Mode::Home,
-            last_tick_key_events: Vec::new(),
-            action_tx,
-            action_rx,
         })
     }
 
     pub async fn run(&mut self) -> color_eyre::Result<()> {
         self.tui.enter()?;
-
-        let action_tx = self.action_tx.clone();
         loop {
             // self.handle_events(&mut tui).await?;
             self.handle_actions().await?;
             if self.should_suspend {
                 self.tui.suspend()?;
-                action_tx.send(Action::Resume)?;
-                action_tx.send(Action::ClearScreen)?;
                 // tui.mouse(true);
                 self.tui.enter()?;
             } else if self.should_quit {
@@ -79,11 +64,6 @@ impl<T: Widget + Copy> App<T> {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) -> color_eyre::Result<()> {
-        let action_tx = self.action_tx.clone();
-
-        let Some(keymap) = self.config.keybindings.0.get(&self.mode) else {
-            return Ok(());
-        };
         use AppState::AppState::*;
 
         let move_key_pressed_handler = |key_code: KeyCode| {
@@ -151,11 +131,10 @@ impl<T: Widget + Copy> App<T> {
         let Some(event) = self.tui.next_event().await else {
             return Ok(());
         };
-        let action_tx = self.action_tx.clone();
         match &event {
-            Event::Tick => {
-                self.last_tick_key_events.drain(..);
-            }
+            // Event::Tick => {
+            //     self.last_tick_key_events.drain(..);
+            // }
             Event::Quit => self.should_quit = true,
             Event::Key(key) => self.handle_key_event(*key)?,
             Event::Suspend => self.should_suspend = true,
