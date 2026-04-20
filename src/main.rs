@@ -13,6 +13,8 @@ mod extensions;
 mod logging;
 mod tui;
 mod widgets;
+mod MyDefMacro;
+mod Player;
 
 use std::path::*;
 
@@ -41,7 +43,7 @@ async fn main() -> color_eyre::Result<()> {
         .expect("fail to parse current executable path");
     let filtered_args = std::env::args()
         .filter(filter)
-        .filter(|arg| arg == current_exe_path);
+        .filter(|arg| arg != current_exe_path);
 
     // AppState::AppState::init(filtered_args.collect());
 

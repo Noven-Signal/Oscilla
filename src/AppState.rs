@@ -10,6 +10,7 @@ pub mod AppState {
     use color_eyre::eyre::Ok;
     use crossterm::event::KeyCode;
     use futures::future::ok;
+    use ratatui::widgets::ListState;
 
     use crate::AppState;
     use crate::extensions::OnceLock::OnceLock_ext;
@@ -17,6 +18,7 @@ pub mod AppState {
     use crate::widgets::ButtonArea;
     use crate::widgets::ButtonArea::ButtonsArea;
     use crate::widgets::VolArea::VolArea;
+     use crate::widgets::ListArea::ListArea;
 
     #[derive(Clone, Copy, Debug)]
     pub enum TabState {
@@ -48,7 +50,7 @@ pub mod AppState {
     macro_rules! get_area_handler_fn {
         ($self: ident,$ident:ident) => {
             match $self {
-                Tabs::ListArea => todo!(),
+                Tabs::ListArea => handle_key_via_trait!(ListArea, $ident),
                 Tabs::EffectArea => todo!(),
                 Tabs::DurationBarArea => todo!(),
                 Tabs::ButtonsArea => handle_key_via_trait!(ButtonsArea, $ident),
@@ -153,6 +155,7 @@ pub mod AppState {
         pub button_handler_func_dic: ButtonIdentToHandler,
         pub vol_state: u16,
         pub play_list: Vec<String>,
+        pub play_list_selected: ListState
     }
 
     impl AppStateContainer {
@@ -165,27 +168,8 @@ pub mod AppState {
                 button_handler_func_dic: ButtonIdentToHandler::new(),
                 play_list: list,
                 vol_state: 100,
+                play_list_selected: ListState::default()
             }
         }
     }
-    // type OLM<T> = OnceLock<Mutex<T>>;
-    // type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
-
-    // focus_state: OLM<TabState> = OnceLock::new();
-    // button_focus_state: OLM<ButtonIdent> = OnceLock::new();
-
-    // button_handler_func_dic: OLM<ButtonIdentToHandler> = OnceLock::new();
-
-    // vol_state: AtomicU16 = AtomicU16::new(100);
-
-    // play_list: OLM<Vec<String>> = OnceLock::new();
-
-    // fn init(list: Vec<String>) {
-    //     focus_state.get_or_init(|| Mutex::new(TabState::None));
-    //     button_focus_state.get_or_init(|| Mutex::new(ButtonIdent::Play));
-
-    //     button_handler_func_dic.get_or_init(|| Mutex::new(ButtonIdentToHandler::new()));
-
-    //     play_list.get_or_init(|| Mutex::new(list));
-    // }
 }

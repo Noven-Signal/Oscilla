@@ -14,9 +14,14 @@
                     "--bin=exp-componet"
                 ]
             },
-            "args": [],
-            "initCommands": ["breakpoint set --name core::panicking::panic_fmt"]
-            
+            "args": [
+                "C:\\dir_dev\\This game .mp3",
+                "C:\\dir_dev\\today.mp3",
+                "C:\\dir_dev\\taking my heart.mp3",
+            ],
+            "initCommands": [
+                "breakpoint set --name core::panicking::panic_fmt"
+            ]
         },
         {
             "name": "Debug unit tests in executable 'exp-componet'",
