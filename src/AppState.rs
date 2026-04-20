@@ -26,9 +26,9 @@ pub mod AppState {
     }
 
     pub trait AreaHandler {
-        fn handle_key(key_code: KeyCode);
-        fn get_tab_selected_handler() {}
-        fn lost_tab_selection_handler() {}
+        fn handle_key(app_state_container: &mut AppStateContainer,key_code: KeyCode);
+        fn get_tab_selected_handler(app_state_container: &mut AppStateContainer) {}
+        fn lost_tab_selection_handler(app_state_container: &mut AppStateContainer) {}
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -93,17 +93,17 @@ pub mod AppState {
             }
         }
 
-        pub fn handle_key(&self, key_code: KeyCode) {
+        pub fn handle_key(&self,app_state_container: &mut AppStateContainer, key_code: KeyCode) {
             let func = get_area_handler_fn!(self, handle_key);
-            func(key_code);
+            func(app_state_container ,key_code);
         }
-        pub fn get_tab_selected_handler(&self) {
+        pub fn get_tab_selected_handler(&self,app_state_container: &mut AppStateContainer,) {
             let func = get_area_handler_fn!(self, get_tab_selected_handler);
-            func();
+            func(app_state_container);
         }
-        pub fn lost_tab_selection_handler(&self) {
+        pub fn lost_tab_selection_handler(&self,app_state_container: &mut AppStateContainer,) {
             let func = get_area_handler_fn!(self, lost_tab_selection_handler);
-            func();
+            func(app_state_container);
         }
     }
 
@@ -119,7 +119,6 @@ pub mod AppState {
             match *self {
                 TabState::Focused(tab) => {
                     *self = Self::Selected(tab);
-                    tab.get_tab_selected_handler();
                 }
                 _ => {}
             }
@@ -147,24 +146,46 @@ pub mod AppState {
         }
     }
 
-    type OLM<T> = OnceLock<Mutex<T>>;
     type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
-
-    pub static focus_state: OLM<TabState> = OnceLock::new();
-    pub static button_focus_state: OLM<ButtonIdent> = OnceLock::new();
-
-    pub static button_handler_func_dic: OLM<ButtonIdentToHandler> = OnceLock::new();
-
-    pub static vol_state: AtomicU16 = AtomicU16::new(100);
-
-    pub static play_list: OLM<Vec<String>> = OnceLock::new();
-
-    pub fn init(list: Vec<String>) {
-        focus_state.get_or_init(|| Mutex::new(TabState::None));
-        button_focus_state.get_or_init(|| Mutex::new(ButtonIdent::Play));
-
-        button_handler_func_dic.get_or_init(|| Mutex::new(ButtonIdentToHandler::new()));
-
-        play_list.get_or_init(|| Mutex::new(list));
+    pub struct AppStateContainer {
+        pub focus_state: TabState,
+        pub button_focus_state: ButtonIdent,
+        pub button_handler_func_dic: ButtonIdentToHandler,
+        pub vol_state: u16,
+        pub play_list: Vec<String>,
     }
+
+    impl AppStateContainer {
+        pub fn new(list: Vec<String>) -> Self {
+            //          type OLM<T> = OnceLock<Mutex<T>>;
+            // type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
+            Self {
+                focus_state: TabState::None,
+                button_focus_state: ButtonIdent::Play,
+                button_handler_func_dic: ButtonIdentToHandler::new(),
+                play_list: list,
+                vol_state: 100,
+            }
+        }
+    }
+    // type OLM<T> = OnceLock<Mutex<T>>;
+    // type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
+
+    // focus_state: OLM<TabState> = OnceLock::new();
+    // button_focus_state: OLM<ButtonIdent> = OnceLock::new();
+
+    // button_handler_func_dic: OLM<ButtonIdentToHandler> = OnceLock::new();
+
+    // vol_state: AtomicU16 = AtomicU16::new(100);
+
+    // play_list: OLM<Vec<String>> = OnceLock::new();
+
+    // fn init(list: Vec<String>) {
+    //     focus_state.get_or_init(|| Mutex::new(TabState::None));
+    //     button_focus_state.get_or_init(|| Mutex::new(ButtonIdent::Play));
+
+    //     button_handler_func_dic.get_or_init(|| Mutex::new(ButtonIdentToHandler::new()));
+
+    //     play_list.get_or_init(|| Mutex::new(list));
+    // }
 }

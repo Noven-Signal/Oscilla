@@ -9,32 +9,30 @@ use ratatui::widgets::{Block, LineGauge};
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use crate::AppState::AppState::{
-    AreaHandler, TabState, Tabs, button_focus_state, focus_state, vol_state,
-};
+    AppStateContainer, AreaHandler, TabState, Tabs};
 use crate::extensions::OnceLock::OnceLock_ext;
-
 
 #[derive(Default)]
 pub struct VolArea {}
 
-impl Widget for VolArea {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let focus_state_mutex = focus_state.get_mutex_guard();
+impl StatefulWidget for VolArea {
+    type State = AppStateContainer;
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        
 
         let [guarge_area, digit_area] = area.margin(None).layout(
             &Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Fill(1), Constraint::Length(3)]),
         );
-
-        get_decorated_border!(focus_state_mutex, Tabs::VolArea).render(area, buf);
-
-        let vol = vol_state.load(Ordering::Relaxed);
+        
+        get_decorated_border!(state.focus_state, Tabs::VolArea).render(area, buf);
+        let vol = state.vol_state;
         let volume_bar = LineGauge::default()
             .filled_style(Style::new().white().on_magenta().bold())
             .unfilled_style(Style::new().gray().on_black())
             .label("vol ")
-            .ratio(vol as f64 / 100.0)
+            .ratio(state.vol_state as f64 / 100.0)
             .filled_symbol(symbols::line::HORIZONTAL)
             .unfilled_symbol(symbols::line::LIGHT_TRIPLE_DASH_HORIZONTAL);
 
@@ -44,18 +42,18 @@ impl Widget for VolArea {
 }
 
 impl AreaHandler for VolArea {
-    fn handle_key(key_code: KeyCode) {
+    fn handle_key(app_state_continer: &mut AppStateContainer,key_code: KeyCode) {
         let move_quantity: i16 = match key_code {
             KeyCode::Up | KeyCode::Right => 1,
             KeyCode::Down | KeyCode::Left => -1,
             _ => 0,
         };
-        let after = vol_state.load(Ordering::Relaxed) as i16 + move_quantity;
+        let after = app_state_continer.vol_state as i16 + move_quantity;
         let after = match after {
             ..=0 => 0,
             100.. => 100,
             x => x,
         };
-        vol_state.store(after as u16, Ordering::Relaxed);
+        app_state_continer.vol_state = after as u16;
     }
 }

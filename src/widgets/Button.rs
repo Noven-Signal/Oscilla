@@ -6,9 +6,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::Line;
-use ratatui::widgets::Widget;
+use ratatui::widgets::{StatefulWidget, Widget};
 
-use crate::AppState::AppState::button_handler_func_dic;
+use crate::AppState::AppState::AppStateContainer;
 use crate::extensions::OnceLock::OnceLock_ext;
 
 /// A custom widget that renders a button with a label, theme and state.
@@ -65,8 +65,8 @@ impl ButtonIdent {
 /// A button with a label that can be themed.
 impl<'a> Button<'a> {
     pub fn new(ident: ButtonIdent, state: ButtonState, on_pushed: impl Fn() + Send + 'static) -> Self {
-        let mut button_focus_state_mutex_guard = button_handler_func_dic.get_mutex_guard();
-        button_focus_state_mutex_guard.insert(ident.clone(), Box::new(on_pushed));
+    //    let button_handler_func_dic = state
+    //     button_focus_state_mutex_guard.insert(ident.clone(), Box::new(on_pushed));
         Button {
             label: ident.nameof().into(),
             state: state,
@@ -74,9 +74,10 @@ impl<'a> Button<'a> {
     }
 }
 
-impl Widget for Button<'_> {
+impl StatefulWidget for Button<'_> {
+    type State = AppStateContainer;
     #[expect(clippy::cast_possible_truncation)]
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let (background_color, text_color) = match &self.state {
             ButtonState::Normal => (Color::Rgb(0, 100, 0), Color::White),
             ButtonState::Focused => (Color::Magenta, Color::White),

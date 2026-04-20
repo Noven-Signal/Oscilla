@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     layout::Direction,
     prelude::Rect,
-    widgets::{Tabs, Widget},
+    widgets::{StatefulWidget, Tabs, Widget},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -10,23 +10,26 @@ use tokio::sync::{mpsc, watch::error};
 use tracing::{debug, info};
 
 use crate::{
-    AppState,
+    AppState::{self, AppState::AppStateContainer},
     action::Action,
+    app,
     components::{Component, fps::FpsCounter},
     config::Config,
     extensions::OnceLock::OnceLock_ext,
     tui::{Event, Tui},
     widgets::{
+        AppRoot::AppRoot,
         Button::Button,
         ButtonArea::{self, ButtonsArea},
     },
 };
 
-pub struct App<T: Widget + Copy> {
-    root_wiget: T,
+pub struct App {
+    root_wiget: AppRoot,
     should_quit: bool,
     should_suspend: bool,
     tui: Tui,
+    app_state_container: AppStateContainer,
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -35,13 +38,17 @@ pub enum Mode {
     Home,
 }
 
-impl<T: Widget + Copy> App<T> {
-    pub fn new(root_wiget: T) -> color_eyre::Result<Self> {
+impl App {
+    pub fn new(
+        root_wiget: AppRoot,
+        app_state_container: AppStateContainer,
+    ) -> color_eyre::Result<Self> {
         Ok(Self {
             tui: Tui::new()?.mouse(true).paste(true),
             root_wiget: root_wiget,
             should_quit: false,
             should_suspend: false,
+            app_state_container: app_state_container,
         })
     }
 
@@ -66,19 +73,18 @@ impl<T: Widget + Copy> App<T> {
     fn handle_key_event(&mut self, key: KeyEvent) -> color_eyre::Result<()> {
         use AppState::AppState::*;
 
-        let move_key_pressed_handler = |key_code: KeyCode| {
-            let mut focus_state_mutex = focus_state.get_mutex_guard();
-
-            match *focus_state_mutex {
+        let mut move_key_pressed_handler = |key_code: KeyCode| {
+            let app_state_container = &mut self.app_state_container;
+            match app_state_container.focus_state {
                 TabState::Focused(_) | TabState::None => {
-                    let next = (*focus_state_mutex).get_focus_tab(key_code);
-                    *focus_state_mutex = match next {
+                    let next = (app_state_container.focus_state).get_focus_tab(key_code);
+                    app_state_container.focus_state = match next {
                         Some(next) => TabState::Focused(next),
                         None => TabState::None,
                     }
                 }
                 TabState::Selected(tabs) => {
-                    tabs.handle_key(key_code);
+                    tabs.handle_key(&mut self.app_state_container,key_code);
                 }
             }
         };
@@ -101,20 +107,22 @@ impl<T: Widget + Copy> App<T> {
                     move_key_pressed_handler(code)
                 }
                 KeyCode::Enter => {
-                    let mut focus_state_mutex = focus_state.get_mutex_guard();
-                    match *focus_state_mutex {
+                    let app_state_container = &mut self.app_state_container;
+                    match app_state_container.focus_state {
                         TabState::Focused(tab) => {
-                            focus_state_mutex.select();
-                            tab.get_tab_selected_handler();
+                            app_state_container.focus_state.select();
+                             tab.get_tab_selected_handler(app_state_container);
                         }
                         _ => {}
                     }
                 }
                 KeyCode::Esc => {
-                    let mut focus_state_mutex = focus_state.get_mutex_guard();
-                    match *focus_state_mutex {
-                        TabState::Focused(_) => *focus_state_mutex = TabState::None,
-                        TabState::Selected(tabs) => *focus_state_mutex = TabState::Focused(tabs),
+                    let app_state_container = &mut self.app_state_container;
+                    match app_state_container.focus_state {
+                        TabState::Focused(_) => app_state_container.focus_state = TabState::None,
+                        TabState::Selected(tabs) => {
+                            app_state_container.focus_state = TabState::Focused(tabs)
+                        }
                         TabState::None => {}
                     }
                 }
@@ -157,13 +165,17 @@ impl<T: Widget + Copy> App<T> {
     }
 
     fn render(&mut self) -> color_eyre::Result<()> {
-       self.partial_render(self.root_wiget)
+        self.partial_render(self.root_wiget)
     }
 
-    fn partial_render(&mut self, reder_wiget:impl Widget) -> color_eyre::Result<()> {
+    fn partial_render(&mut self, app_root: AppRoot) -> color_eyre::Result<()> {
         self.tui.draw(|frame| {
-            //self.root_wiget.render(frame.area(), frame.buffer_mut());
-            frame.render_widget(reder_wiget, frame.area());
+            StatefulWidget::render(
+                app_root,
+                frame.area(),
+                frame.buffer_mut(),
+                &mut self.app_state_container,
+            );
         })?;
         Ok(())
     }

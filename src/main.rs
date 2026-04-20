@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{app::App, extensions::OnceLock::OnceLock_ext, widgets::AppRoot};
+use crate::{AppState::AppState::AppStateContainer, app::App, extensions::OnceLock::OnceLock_ext, widgets::AppRoot::*};
 
 mod AppState;
 mod action;
@@ -15,6 +15,7 @@ mod tui;
 mod widgets;
 
 use std::path::*;
+
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -42,9 +43,9 @@ async fn main() -> color_eyre::Result<()> {
         .filter(filter)
         .filter(|arg| arg == current_exe_path);
 
-    AppState::AppState::init(filtered_args.collect());
+    // AppState::AppState::init(filtered_args.collect());
 
-    let mut app = App::new(AppRoot::AppRoot::default())?;
+    let mut app = App::new(AppRoot::default(), AppStateContainer::new(filtered_args.collect()))?;
     app.run().await?;
     Ok(())
 }

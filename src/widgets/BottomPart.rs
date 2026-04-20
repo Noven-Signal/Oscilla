@@ -1,8 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, LineGauge, Widget};
 
-use crate::AppState::AppState::{TabState, Tabs, focus_state};
-use crate::extensions::OnceLock::OnceLock_ext;
+use crate::AppState::AppState::{AppStateContainer, TabState, Tabs};
 use crate::extensions::Rect::RectExtension;
 use crate::get_decorated_border;
 use crate::widgets::ButtonArea::ButtonsArea;
@@ -21,9 +20,10 @@ impl BottomPart {
     }
 }
 
-impl Widget for BottomPart {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let focus_state_mutex = focus_state.get_mutex_guard();
+impl StatefulWidget for BottomPart {
+    type State = AppStateContainer;
+    fn render(self, area: Rect, buf: &mut Buffer,state: &mut Self::State) {
+      
 
         let [progressbar_area, buttons_and_volume_area] = area.layout(
             &Layout::default()
@@ -32,7 +32,7 @@ impl Widget for BottomPart {
                 .spacing(-1),
         );
 
-        get_decorated_border!(focus_state_mutex,Tabs::DurationBarArea).render(progressbar_area, buf);
+        get_decorated_border!(state.focus_state,Tabs::DurationBarArea).render(progressbar_area, buf);
 
         let [progressbar_area, remaining_time_area] = progressbar_area.margin(None).layout(
             &Layout::default()
@@ -63,9 +63,9 @@ impl Widget for BottomPart {
                     Constraint::Length(20),
                 ]),
         );
-        drop(focus_state_mutex);
-        ButtonsArea::default().render(buttons_area, buf);
+   
+        ButtonsArea::default().render(buttons_area, buf,state);
 
-        VolArea::default().render(volume_area, buf);
+        VolArea::default().render(volume_area, buf,state);
     }
 }

@@ -1,6 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, List, ListDirection, ListItem, ListState, Widget};
 
+use crate::AppState::AppState::AppStateContainer;
 use crate::extensions::OnceLock::OnceLock_ext;
 use crate::extensions::Rect::RectExtension;
 use crate::{AppState, get_decorated_border};
@@ -8,23 +9,21 @@ use crate::{AppState, get_decorated_border};
 #[derive(Default)]
 pub struct ListArea {}
 
-impl Widget for ListArea {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl StatefulWidget for ListArea {
+    type State = AppStateContainer;
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut AppStateContainer) {
         use AppState::AppState::*;
-        let mut state = ListState::default();
-        state.select_first();
+        let mut list_state = ListState::default();
+        list_state.select_first();
 
-        let focus_state_mutex = focus_state.get_mutex_guard();
+        let block = get_decorated_border!(state.focus_state, Tabs::ListArea);
 
-        let block = get_decorated_border!(focus_state_mutex, Tabs::ListArea);
-
-        let play_list_mutex = play_list.get_mutex_guard();
 
         let items = [
             "[Gusteau]: With enough passion, yes.",
             "[Remy]: But can anyone build a TUI in Rust?",
             "[Gusteau]: Anyone can cook!",
-            &format!("focus_state_mutex_ref: {:?}", *focus_state_mutex),
+            &format!("focus_state_mutex_ref: {:?}", state.play_list),
         ];
 
        // let list = List::new(*play_list_mutex.iter().map(|s| ListItem::new(s.as_str())));
@@ -43,6 +42,6 @@ impl Widget for ListArea {
         };
         block.title("song list").render(area, buf);
 
-        StatefulWidget::render(list, area.margin(None), buf, &mut state);
+        StatefulWidget::render(list, area.margin(None), buf, &mut list_state);
     }
 }
