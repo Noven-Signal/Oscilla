@@ -1,8 +1,22 @@
-use std::path::Path;
+use std::{fs::File, path::Path};
 
-use crate::{AppState::AppState::AppStateContainer, app::App, extensions::OnceLock::OnceLock_ext, widgets::AppRoot::*};
+use symphonia::{
+    core::{
+        codecs::{CodecRegistry, DecoderOptions},
+        io::MediaSourceStream,
+        probe::{Hint, Probe},
+    },
+    default::{formats::WavReader, get_codecs, get_probe},
+};
+
+use crate::{
+    AppState::AppState::AppStateContainer, DecoderWrapper::DecoderOptionsAndTrackNum, app::App,
+    extensions::OnceLock::OnceLock_ext, widgets::AppRoot::*,
+};
 
 mod AppState;
+mod MyDefMacro;
+mod DecoderWrapper;
 mod action;
 mod app;
 mod cli;
@@ -13,11 +27,10 @@ mod extensions;
 mod logging;
 mod tui;
 mod widgets;
-mod MyDefMacro;
-mod Player;
+mod AudioOutput;
+mod manipulation;
 
 use std::path::*;
-
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -43,11 +56,37 @@ async fn main() -> color_eyre::Result<()> {
         .expect("fail to parse current executable path");
     let filtered_args = std::env::args()
         .filter(filter)
-        .filter(|arg| arg != current_exe_path);
+        .filter(|arg| arg != current_exe_path)
+        .collect::<Vec<String>>();
 
-    // AppState::AppState::init(filtered_args.collect());
+    //AudioOutput::main()?;
+    return Ok(());
+    
 
-    let mut app = App::new(AppRoot::default(), AppStateContainer::new(filtered_args.collect()))?;
+    // let codecs = get_codecs();
+    // let probe = get_probe();
+    // use std::fs::File;
+    // let file = File::open(filtered_args[0].as_str()).unwrap();
+    // let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    // // _hint: &Hint,
+    // // mut mss: MediaSourceStream,
+    // // format_opts: &FormatOptions,
+    // // metadata_opts: &MetadataOptions,
+    // let mut hint = Hint::new();
+    // hint.with_extension("mp3");
+    // let probe_result = probe.format(&hint, mss, &Default::default(), &Default::default());
+    // let format_reader = match probe_result {
+    //     Ok(res) => res.format,
+    //     Err(_) => todo!(),
+    // };
+    // let options = DecoderOptionsAndTrackNum {
+    //     dec_opts: DecoderOptions { verify: true },
+    //     track_num: Some(0),
+    // };
+    // let _ = DecoderWrapper::DecoderWrapper ::doecode(format_reader, options);
+
+    let mut app = App::new(AppRoot::default(), AppStateContainer::new(filtered_args))?;
     app.run().await?;
     Ok(())
 }

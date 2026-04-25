@@ -18,13 +18,6 @@ impl StatefulWidget for ListArea {
 
         let block = get_decorated_border!(state.focus_state, Tabs::ListArea);
 
-        let items = [
-            "[Gusteau]: With enough passion, yes.",
-            "[Remy]: But can anyone build a TUI in Rust?",
-            "[Gusteau]: Anyone can cook!",
-            //  &format!("focus_state_mutex_ref: {:?}", state.play_list),
-        ];
-
         // let list = List::new(*play_list_mutex.iter().map(|s| ListItem::new(s.as_str())));
         let items = state.play_list.iter().map(|x| x.as_str());
 

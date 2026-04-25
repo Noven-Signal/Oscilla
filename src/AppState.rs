@@ -17,8 +17,8 @@ pub mod AppState {
     use crate::widgets::Button::ButtonIdent;
     use crate::widgets::ButtonArea;
     use crate::widgets::ButtonArea::ButtonsArea;
+    use crate::widgets::ListArea::ListArea;
     use crate::widgets::VolArea::VolArea;
-     use crate::widgets::ListArea::ListArea;
 
     #[derive(Clone, Copy, Debug)]
     pub enum TabState {
@@ -28,7 +28,7 @@ pub mod AppState {
     }
 
     pub trait AreaHandler {
-        fn handle_key(app_state_container: &mut AppStateContainer,key_code: KeyCode);
+        fn handle_key(app_state_container: &mut AppStateContainer, key_code: KeyCode);
         fn get_tab_selected_handler(app_state_container: &mut AppStateContainer) {}
         fn lost_tab_selection_handler(app_state_container: &mut AppStateContainer) {}
     }
@@ -95,15 +95,15 @@ pub mod AppState {
             }
         }
 
-        pub fn handle_key(&self,app_state_container: &mut AppStateContainer, key_code: KeyCode) {
+        pub fn handle_key(&self, app_state_container: &mut AppStateContainer, key_code: KeyCode) {
             let func = get_area_handler_fn!(self, handle_key);
-            func(app_state_container ,key_code);
+            func(app_state_container, key_code);
         }
-        pub fn get_tab_selected_handler(&self,app_state_container: &mut AppStateContainer,) {
+        pub fn get_tab_selected_handler(&self, app_state_container: &mut AppStateContainer) {
             let func = get_area_handler_fn!(self, get_tab_selected_handler);
             func(app_state_container);
         }
-        pub fn lost_tab_selection_handler(&self,app_state_container: &mut AppStateContainer,) {
+        pub fn lost_tab_selection_handler(&self, app_state_container: &mut AppStateContainer) {
             let func = get_area_handler_fn!(self, lost_tab_selection_handler);
             func(app_state_container);
         }
@@ -155,7 +155,7 @@ pub mod AppState {
         pub button_handler_func_dic: ButtonIdentToHandler,
         pub vol_state: u16,
         pub play_list: Vec<String>,
-        pub play_list_selected: ListState
+        pub play_list_selected: ListState,
     }
 
     impl AppStateContainer {
@@ -168,7 +168,7 @@ pub mod AppState {
                 button_handler_func_dic: ButtonIdentToHandler::new(),
                 play_list: list,
                 vol_state: 100,
-                play_list_selected: ListState::default()
+                play_list_selected: ListState::default(),
             }
         }
     }
