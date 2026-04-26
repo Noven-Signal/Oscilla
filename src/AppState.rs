@@ -1,21 +1,10 @@
 pub mod AppState {
     use std::collections::HashMap;
-    use std::sync::Mutex;
 
-    use std::sync::OnceLock;
-    use std::sync::RwLock;
-    use std::sync::atomic::AtomicI32;
-    use std::sync::atomic::AtomicU16;
-
-    use color_eyre::eyre::Ok;
     use crossterm::event::KeyCode;
-    use futures::future::ok;
     use ratatui::widgets::ListState;
 
-    use crate::AppState;
-    use crate::extensions::OnceLock::OnceLock_ext;
     use crate::widgets::Button::ButtonIdent;
-    use crate::widgets::ButtonArea;
     use crate::widgets::ButtonArea::ButtonsArea;
     use crate::widgets::ListArea::ListArea;
     use crate::widgets::VolArea::VolArea;

@@ -20,7 +20,8 @@
                 "C:\\dir_dev\\taking my heart.mp3",
             ],
             "initCommands": [
-                "breakpoint set --name core::panicking::panic_fmt"
+                "breakpoint set --name core::panicking::panic_fmt",
+                "breakpoint set --name core::panicking::panic_nounwind_fmt"
             ]
         },
         {

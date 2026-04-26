@@ -1,22 +1,11 @@
-use std::{fs::File, path::Path};
+use std::path::Path;
 
-use symphonia::{
-    core::{
-        codecs::{CodecRegistry, DecoderOptions},
-        io::MediaSourceStream,
-        probe::{Hint, Probe},
-    },
-    default::{formats::WavReader, get_codecs, get_probe},
-};
-
-use crate::{
-    AppState::AppState::AppStateContainer, DecoderWrapper::DecoderOptionsAndTrackNum, app::App,
-    extensions::OnceLock::OnceLock_ext, widgets::AppRoot::*,
-};
+use crate::{AppState::AppState::AppStateContainer, app::App, widgets::AppRoot::*};
 
 mod AppState;
-mod MyDefMacro;
+mod AudioOutput;
 mod DecoderWrapper;
+mod MyDefMacro;
 mod action;
 mod app;
 mod cli;
@@ -25,12 +14,9 @@ mod config;
 mod errors;
 mod extensions;
 mod logging;
+mod manipulation;
 mod tui;
 mod widgets;
-mod AudioOutput;
-mod manipulation;
-
-use std::path::*;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -50,6 +36,7 @@ async fn main() -> color_eyre::Result<()> {
         }
         None => false,
     };
+
     let current_exe = std::env::current_exe().expect("fail to retreive executable path");
     let current_exe_path = current_exe
         .to_str()
@@ -59,9 +46,12 @@ async fn main() -> color_eyre::Result<()> {
         .filter(|arg| arg != current_exe_path)
         .collect::<Vec<String>>();
 
-    //AudioOutput::main()?;
+    tokio::spawn(async move {
+        manipulation::play_executor(&filtered_args[0]).await;
+    })
+    .await;
+
     return Ok(());
-    
 
     // let codecs = get_codecs();
     // let probe = get_probe();

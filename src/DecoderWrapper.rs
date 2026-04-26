@@ -61,7 +61,7 @@ impl DecoderWrapper {
         })
     }
 
-    pub fn decode(&mut self) -> DecodeResult {
+    pub fn decode(&'_ mut self) -> DecodeResult<'_> {
         let packet = match self.reader.next_packet() {
             Ok(p) => p,
             Err(err) => return DecodeResult::Err(err),
