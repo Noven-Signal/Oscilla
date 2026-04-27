@@ -12,7 +12,7 @@ use symphonia::{
     core::{audio::Signal, io::MediaSourceStream, probe::Hint},
     default::get_probe,
 };
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio_util::sync::CancellationToken;
 use urlencoding::decode;
 
@@ -22,35 +22,48 @@ use crate::{
     DecoderWrapper::{DecodeResult, DecoderWrapper},
 };
 
-pub fn play(app_state_container: &AppStateContainer) {
-    let Some(selected) = app_state_container.play_list_selected.selected() else {
-        return;
-    };
-    let playback_file_path_ptr = app_state_container.play_list[selected].as_str();
-    let playback_file_path = String::from(playback_file_path_ptr);
+// pub fn play(app_state_container: &AppStateContainer) {
+//     let Some(selected) = app_state_container.play_list_selected.selected() else {
+//         return;
+//     };
+//     let playback_file_path_ptr = app_state_container.play_list[selected].as_str();
+//     let playback_file_path = String::from(playback_file_path_ptr);
 
-    tokio::spawn(async move {
-        play_executor(&playback_file_path).await;
-    });
+//     tokio::spawn(async move {
+//         play_executor(&playback_file_path).await;
+//     });
+// }
+
+pub struct DecoderRendererSyncSignal();
+
+pub enum RendererControlSignal {
+    SetVol(u16),
+    Pause,
+    Resume
 }
-
-pub struct SendSignal();
-
+pub enum PlayerControlSignal {
+    SetVol(u16),
+    Pause,
+    Resume
+}
 pub type ChannelData = [Vec<f32>; 8];
 
 pub struct SharedBuffer {
     pub channel_left_data: ChannelData,
     pub channel_right_data: ChannelData,
-    pub renderer_to_decoder_sender: UnboundedSender<SendSignal>,
-    pub renderer_to_docoder_reciever: UnboundedReceiver<SendSignal>,
-    pub decoder_to_renderer_sender: UnboundedSender<SendSignal>,
-    pub decoder_to_renderer_reciever: UnboundedReceiver<SendSignal>,
+    pub renderer_to_decoder_sender: UnboundedSender<DecoderRendererSyncSignal>,
+    pub renderer_to_docoder_reciever: UnboundedReceiver<DecoderRendererSyncSignal>,
+    pub decoder_to_renderer_sender: UnboundedSender<DecoderRendererSyncSignal>,
+    pub decoder_to_renderer_reciever: UnboundedReceiver<DecoderRendererSyncSignal>,
 }
 unsafe impl Send for SharedBuffer {}
 
 pub const BLOCK_SIZE: usize = 100 * 1024;
 
-pub async fn play_executor(playback_file_path: &str) {
+pub async fn play_executor(
+    playback_file_path: &str,
+    player_control_signal_recv: &mut UnboundedReceiver<PlayerControlSignal>,
+) {
     let probe = get_probe();
     use std::fs::File;
     let Ok(file) = File::open(playback_file_path) else {
@@ -90,14 +103,13 @@ pub async fn play_executor(playback_file_path: &str) {
     };
 
     for _ in 0..6 {
-        shared_buffer.renderer_to_decoder_sender.send(SendSignal());
+        shared_buffer
+            .renderer_to_decoder_sender
+            .send(DecoderRendererSyncSignal());
     }
 
     let shared_buffer_for_decoder = AtomicPtr::new(&raw mut shared_buffer);
     let shared_buffer_for_renderer = AtomicPtr::new(&raw mut shared_buffer);
-
-    // let shared_buffer = unsafe { shared_buffer_for_decoder.into_inner().as_mut().unwrap() };
-    //let p = ss.as_mut().unwrap();
 
     let retrieve_ref = |atomic_ptr: AtomicPtr<SharedBuffer>| unsafe {
         atomic_ptr.load(Ordering::Acquire).as_mut().unwrap()
@@ -108,14 +120,26 @@ pub async fn play_executor(playback_file_path: &str) {
         append_decode_buffer(&mut decoder_wrapper, shared_buffer).await;
     });
 
+    let (renderer_control_signal_sender, renderer_control_signal_recv) =
+        unbounded_channel::<RendererControlSignal>();
+
     let renderer_handle = tokio::spawn(async move {
         let shared_buffer = retrieve_ref(shared_buffer_for_renderer);
-        let cancellation_token = CancellationToken::new();
-        AudioOutput::main(shared_buffer, cancellation_token)
-            .await
-            .unwrap();
+
+        AudioOutput::main(shared_buffer, renderer_control_signal_recv).await.unwrap();
         //let res = res.ok();
     });
+
+    'l1: loop {
+        let map_signal = match player_control_signal_recv.recv().await {
+            Some(PlayerControlSignal::SetVol(vol)) => RendererControlSignal::SetVol(vol),
+            Some(PlayerControlSignal::Pause) => RendererControlSignal::Pause,
+            Some(PlayerControlSignal::Resume) => RendererControlSignal::Resume,
+            
+            None => break 'l1,
+        };
+        renderer_control_signal_sender.send(map_signal);
+    }
 
     decoder_handle.await;
     renderer_handle.await;
@@ -137,7 +161,7 @@ async fn append_decode_buffer(
         reciever.recv().await;
 
         let sender = &mut shared_buffer.decoder_to_renderer_sender;
-        sender.send(SendSignal());
+        sender.send(DecoderRendererSyncSignal());
     };
 
     let mut write_exclusive: usize = 1;

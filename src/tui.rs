@@ -18,14 +18,13 @@ use futures::{FutureExt, StreamExt};
 use ratatui::backend::CrosstermBackend as Backend;
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender, unbounded_channel},
     task::JoinHandle,
     time::interval,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 use urlencoding;
-
 
 use crossterm::execute;
 
@@ -63,7 +62,7 @@ pub struct Tui {
 
 impl Tui {
     pub fn new() -> color_eyre::Result<Self> {
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = unbounded_channel::<Event>();
         Ok(Self {
             terminal: ratatui::Terminal::new(Backend::new(stdout()))?,
             task: tokio::spawn(async {}),

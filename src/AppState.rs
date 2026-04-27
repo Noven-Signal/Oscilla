@@ -3,8 +3,11 @@ pub mod AppState {
 
     use crossterm::event::KeyCode;
     use ratatui::widgets::ListState;
+    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-    use crate::widgets::Button::ButtonIdent;
+    use crate::manipulation::PlayerControlSignal;
+    use crate::tui::Event;
+    use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
     use crate::widgets::ListArea::ListArea;
     use crate::widgets::VolArea::VolArea;
@@ -137,14 +140,21 @@ pub mod AppState {
         }
     }
 
-    type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
+    pub enum PlayState {
+        Playing(usize),
+        Pause(usize),
+        Stop,
+    }
+
+    //type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
     pub struct AppStateContainer {
         pub focus_state: TabState,
         pub button_focus_state: ButtonIdent,
-        pub button_handler_func_dic: ButtonIdentToHandler,
         pub vol_state: u16,
         pub play_list: Vec<String>,
         pub play_list_selected: ListState,
+        pub play_list_playing: PlayState,
+        pub player_control_singnal_sender: Option<UnboundedSender<PlayerControlSignal>>,
     }
 
     impl AppStateContainer {
@@ -153,11 +163,12 @@ pub mod AppState {
             // type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
             Self {
                 focus_state: TabState::None,
-                button_focus_state: ButtonIdent::Play,
-                button_handler_func_dic: ButtonIdentToHandler::new(),
+                button_focus_state: ButtonIdent::PlayOrPause(PlayButtonState::Playing),
                 play_list: list,
                 vol_state: 100,
                 play_list_selected: ListState::default(),
+                play_list_playing: PlayState::Stop,
+                player_control_singnal_sender: None,
             }
         }
     }

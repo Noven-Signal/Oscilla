@@ -1,28 +1,28 @@
 use core::panic;
 use core::result::Result::Ok;
 
-use futures::future::ok;
 use imp::CreateEventW;
 use std::ops::Range;
 use std::ptr::null;
-use std::thread::sleep;
-use std::time::Duration;
-use tokio_util::sync::CancellationToken;
+use tokio::sync::mpsc::UnboundedReceiver;
+
 use windows::Win32::Foundation::{HANDLE, WAIT_EVENT};
-use windows::Win32::System::Threading::{INFINITE, ResetEvent, WaitForSingleObject};
+use windows::Win32::System::Threading::{INFINITE, WaitForSingleObject};
 use windows::{
     Win32::{Media::Audio::*, System::Com::*},
     core::*,
 };
 
-use crate::manipulation::{BLOCK_SIZE, SendSignal, SharedBuffer};
+use crate::manipulation::{
+    BLOCK_SIZE, DecoderRendererSyncSignal, RendererControlSignal, SharedBuffer,
+};
 
 pub async fn main(
     shared_buffer: &mut SharedBuffer,
-    cancellation_token: CancellationToken,
+    control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
 ) -> Result<()> {
     unsafe {
-        let mut audio_output = AudioOutput::new(shared_buffer, cancellation_token)?;
+        let mut audio_output = AudioOutput::new(shared_buffer, control_signal_receiver)?;
         audio_output.start().await;
     }
     Ok(())
@@ -32,22 +32,22 @@ struct AudioOutput<'a> {
     audio_client: IAudioClient,
     render_client: IAudioRenderClient,
     buffer_frame_count: u32,
-    cancellation_token: CancellationToken,
     shared_buffer: &'a mut SharedBuffer,
     wasapi_event_hanle: HANDLE,
+    control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
 }
 unsafe impl<'a> Send for AudioOutput<'a> {}
 
 impl<'a> AudioOutput<'a> {
     pub unsafe fn new(
         shared_buffer: &'a mut SharedBuffer,
-        cancellation_token: CancellationToken,
+        control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
     ) -> Result<Self> {
         unsafe {
             CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
         }
         let handle = {
-            let handle = CreateEventW(null(), 0, 0, null());
+            let handle = unsafe { CreateEventW(null(), 0, 0, null()) };
             HANDLE(handle)
         };
         let audio_client = unsafe { Self::setup_audio_client(handle) }?;
@@ -55,12 +55,12 @@ impl<'a> AudioOutput<'a> {
         let render_client = unsafe { audio_client.GetService()? };
 
         Ok(Self {
-            audio_client: audio_client,
+            audio_client,
             buffer_frame_count,
             render_client,
-            cancellation_token,
             shared_buffer,
             wasapi_event_hanle: handle,
+            control_signal_receiver,
         })
     }
     #[allow(unsafe_op_in_unsafe_fn)]
@@ -90,7 +90,7 @@ impl<'a> AudioOutput<'a> {
         use windows::Win32::Devices::FunctionDiscovery::*;
         let mut ptr = PKEY_Device_FriendlyName;
         let pro_varant = prop.unwrap().GetValue(&ptr);
-        println!("{}", pro_varant.unwrap());
+        //println!("{}", pro_varant.unwrap());
         // let v = prop.unwrap().GetValue(*PROPERTYKEY::QUERY);
         // Activate IAudioClient
         let audio_client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
@@ -104,10 +104,10 @@ impl<'a> AudioOutput<'a> {
         let bits = wave_format.wBitsPerSample;
         let format_tag = wave_format.wFormatTag;
 
-        println!(
-            "sample_rate: {sample_rate}, channels:{channels}, bits:{bits}, format_tag:{format_tag}"
-        );
-        println!("format_tag={:#x}", format_tag);
+        // println!(
+        //     "sample_rate: {sample_rate}, channels:{channels}, bits:{bits}, format_tag:{format_tag}"
+        // );
+        // println!("format_tag={:#x}", format_tag);
         // 1 second buffer duration (100-nanosecond units)
         let duration: i64 = 10_000_000;
         audio_client.Initialize(
@@ -135,18 +135,37 @@ impl<'a> AudioOutput<'a> {
             // let mut write_end = &write_end;
             let reciever = &mut self.shared_buffer.decoder_to_renderer_reciever;
             reciever.recv().await;
+
             let sender = &mut self.shared_buffer.renderer_to_decoder_sender;
-            sender.send(SendSignal());
+            sender.send(DecoderRendererSyncSignal());
         };
 
         let mut head: usize = 0;
         let mut read_exclusive: usize = 0;
         let mut count = 0;
+        let mut vol = 1f32;
 
         'l1: loop {
-            if self.cancellation_token.is_cancelled() {
-                break 'l1;
+            'control_singal_loop: loop {
+                if self.control_signal_receiver.is_empty() {
+                    break 'control_singal_loop;
+                }
+
+                match self.control_signal_receiver.recv().await {
+                    Some(RendererControlSignal::SetVol(set_vol)) => {
+                        vol = set_vol as f32 / 100f32;
+                        break 'control_singal_loop;
+                    }
+                    Some(RendererControlSignal::Pause) => {
+                        match self.control_signal_receiver.recv().await {
+                            Some(RendererControlSignal::Resume) => {}
+                            _ => break 'control_singal_loop,
+                        }
+                    }
+                    _ => break 'l1,
+                }
             }
+
             count = count + 1;
 
             match WaitForSingleObject(self.wasapi_event_hanle, INFINITE) {
@@ -189,8 +208,8 @@ impl<'a> AudioOutput<'a> {
                 let src_slice_ch_1 = &get_block_right(read_exclusive)[head..head + available];
 
                 for i in 0..src_slice_ch_0.len() {
-                    output_buffer[i * 2] = src_slice_ch_0[i];
-                    output_buffer[i * 2 + 1] = src_slice_ch_1[i];
+                    output_buffer[i * 2] = src_slice_ch_0[i] * vol;
+                    output_buffer[i * 2 + 1] = src_slice_ch_1[i] * vol;
                 }
             };
             let target_len = head + available;
@@ -212,14 +231,14 @@ impl<'a> AudioOutput<'a> {
                     //println!("equal");
                 }
                 Greater => {
-                    //println!("Greater");
+                   // println!("Greater");
                     {
                         let src_slice_current_ch_0 = &get_block_left(read_exclusive)[head..];
                         let src_slice_current_ch_1 = &get_block_right(read_exclusive)[head..];
 
                         for i in 0..src_slice_current_ch_0.len() {
-                            output_buffer[i * 2] = src_slice_current_ch_0[i];
-                            output_buffer[i * 2 + 1] = src_slice_current_ch_1[i];
+                            output_buffer[i * 2] = src_slice_current_ch_0[i] * vol;
+                            output_buffer[i * 2 + 1] = src_slice_current_ch_1[i] * vol;
                         }
                     }
 
@@ -236,8 +255,8 @@ impl<'a> AudioOutput<'a> {
                         assert!(src_slice_spill_over_ch_0.len() < BLOCK_SIZE);
                         let split_len = BLOCK_SIZE - head;
                         for i in 0..src_slice_spill_over_ch_0.len() {
-                            output_buffer[i * 2 + split_len] = src_slice_spill_over_ch_0[i];
-                            output_buffer[i * 2 + 1 + split_len] = src_slice_spill_over_ch_1[i];
+                            output_buffer[i * 2 + split_len] = src_slice_spill_over_ch_0[i] * vol;
+                            output_buffer[i * 2 + 1 + split_len] = src_slice_spill_over_ch_1[i] * vol;
                         }
                     }
 

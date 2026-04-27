@@ -1,6 +1,9 @@
 use std::env;
 
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::error;
+
+use crate::tui::Event;
 
 pub fn init() -> color_eyre::Result<()> {
     let (panic_hook, eyre_hook) = color_eyre::config::HookBuilder::default()
@@ -14,11 +17,11 @@ pub fn init() -> color_eyre::Result<()> {
         .into_hooks();
     eyre_hook.install()?;
     std::panic::set_hook(Box::new(move |panic_info| {
-        if let Ok(mut t) = crate::tui::Tui::new() {
-            if let Err(r) = t.exit() {
-                error!("Unable to exit Terminal: {:?}", r);
-            }
-        }
+        // if let Ok(mut t) = crate::tui::Tui::new() {
+        //     if let Err(r) = t.exit() {
+        //         error!("Unable to exit Terminal: {:?}", r);
+        //     }
+        // }
 
         #[cfg(not(debug_assertions))]
         {

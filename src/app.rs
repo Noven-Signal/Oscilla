@@ -6,7 +6,10 @@ use ratatui::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tokio::sync::{mpsc, watch::error};
+use tokio::sync::{
+    mpsc::{self, unbounded_channel},
+    watch::error,
+};
 use tracing::{debug, info};
 
 use crate::{
@@ -84,7 +87,7 @@ impl App {
                     }
                 }
                 TabState::Selected(tabs) => {
-                    tabs.handle_key(&mut self.app_state_container,key_code);
+                    tabs.handle_key(&mut self.app_state_container, key_code);
                 }
             }
         };
@@ -107,11 +110,15 @@ impl App {
                     move_key_pressed_handler(code)
                 }
                 KeyCode::Enter => {
-                    let app_state_container = &mut self.app_state_container;
-                    match app_state_container.focus_state {
+                    //  let app_state_container = &mut self.app_state_container;
+                    match self.app_state_container.focus_state {
                         TabState::Focused(tab) => {
+                            let app_state_container = &mut self.app_state_container;
                             app_state_container.focus_state.select();
-                             tab.get_tab_selected_handler(app_state_container);
+                            tab.get_tab_selected_handler(app_state_container);
+                        }
+                        TabState::Selected(tab) => {
+                            tab.handle_key(&mut self.app_state_container, KeyCode::Enter);
                         }
                         _ => {}
                     }

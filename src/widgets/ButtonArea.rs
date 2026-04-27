@@ -1,10 +1,12 @@
 use crate::extensions::Rect::RectExtension;
-use crate::get_decorated_border;
-use crate::widgets::Button::ButtonState;
+use crate::manipulation::PlayerControlSignal;
+use crate::widgets::Button::{ButtonState, PlayButtonState};
+use crate::{app, get_decorated_border, manipulation};
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, LineGauge};
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::AppState::AppState::{AppStateContainer, AreaHandler, TabState, Tabs};
 use crate::extensions::OnceLock::OnceLock_ext;
@@ -41,17 +43,18 @@ impl StatefulWidget for ButtonsArea {
                 }
             };
         }
-        Button::new(ButtonIdent::Play, match_state!(ButtonIdent::Play), || {}).render(
-            play_button_area,
-            buf,
-            state,
-        );
-        Button::new(ButtonIdent::Prev, match_state!(ButtonIdent::Prev), || {}).render(
+        Button::new(
+            ButtonIdent::get_default_play_ident(state),
+            match_state!(ButtonIdent::PlayOrPause(_)),
+        )
+        .render(play_button_area, buf, state);
+
+        Button::new(ButtonIdent::Prev, match_state!(ButtonIdent::Prev)).render(
             prev_button_area,
             buf,
             state,
         );
-        Button::new(ButtonIdent::Next, match_state!(ButtonIdent::Next), || {}).render(
+        Button::new(ButtonIdent::Next, match_state!(ButtonIdent::Next)).render(
             next_button_area,
             buf,
             state,
@@ -61,16 +64,44 @@ impl StatefulWidget for ButtonsArea {
 
 impl AreaHandler for ButtonsArea {
     fn get_tab_selected_handler(app_state_container: &mut AppStateContainer) {
-        app_state_container.button_focus_state = ButtonIdent::Play;
+        app_state_container.button_focus_state =
+            ButtonIdent::get_default_play_ident(app_state_container);
     }
 
     fn handle_key(app_state_container: &mut AppStateContainer, key_code: KeyCode) {
-        match app_state_container
-            .button_focus_state
-            .get_next_focus(key_code)
-        {
-            Some(next) => app_state_container.button_focus_state = next,
-            None => {}
+        let focused_button_ident = app_state_container.button_focus_state;
+        if let Some(next) = focused_button_ident.get_next_focus(app_state_container, key_code) {
+            app_state_container.button_focus_state = next
+        }
+
+        if key_code != KeyCode::Enter {
+            return;
+        }
+
+        match focused_button_ident {
+            ButtonIdent::PlayOrPause(player_button_state) => 'play_arm: {
+                let sender_app_container = &mut app_state_container.player_control_singnal_sender;
+                let Some(sender) = sender_app_container else {
+                    break 'play_arm;
+                };
+                let player_control_signal = match player_button_state {
+                    PlayButtonState::Playing => PlayerControlSignal::Pause,
+                    PlayButtonState::Paused => PlayerControlSignal::Resume,
+                };
+                if let Err(_) = sender.send(player_control_signal) {
+                    *sender_app_container = None;
+                }
+
+                let play_state = &mut app_state_container.play_list_playing;
+                use crate::AppState::AppState::PlayState::*;
+                *play_state = match play_state {
+                    Playing(idx) => Pause(*idx),
+                    Pause(idx) => Playing(*idx),
+                    Stop => todo!(),
+                };
+            }
+            ButtonIdent::Prev => todo!(),
+            ButtonIdent::Next => todo!(),
         }
     }
 }
