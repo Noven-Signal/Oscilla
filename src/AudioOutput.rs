@@ -112,8 +112,7 @@ impl<'a> AudioOutput<'a> {
         let duration: i64 = 10_000_000;
         audio_client.Initialize(
             AUDCLNT_SHAREMODE_SHARED,
-            0,
-            //AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+            AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
             duration,
             0,
             wave_format_ptr,
@@ -121,7 +120,7 @@ impl<'a> AudioOutput<'a> {
         )?;
         CoTaskMemFree(Some(wave_format_ptr as _));
 
-       // audio_client.SetEventHandle(event_handle);
+        audio_client.SetEventHandle(event_handle);
         Ok(audio_client)
     }
 
@@ -135,14 +134,11 @@ impl<'a> AudioOutput<'a> {
         let mut singnal_to_thread = async || {
             // let mut write_end = &write_end;
             let reciever = &mut self.shared_buffer.decoder_to_renderer_reciever;
-            println!("xxx");
             reciever.recv().await;
-            println!("yyy");
             let sender = &mut self.shared_buffer.renderer_to_decoder_sender;
             sender.send(SendSignal());
         };
 
-        let mut channel_combined_buf: Vec<f32> = vec![0f32; self.buffer_frame_count as usize * 2];
         let mut head: usize = 0;
         let mut read_exclusive = 0;
         let mut count = 0;
@@ -152,15 +148,14 @@ impl<'a> AudioOutput<'a> {
                 break 'l1;
             }
             count = count + 1;
-            println!("count: {count}");
 
-            // match WaitForSingleObject(self.wasapi_event_hanle, INFINITE) {
-            //     windows::Win32::Foundation::WAIT_OBJECT_0 => {}
-            //     WAIT_EVENT(val) => {
-            //         return Err(Error::new(HRESULT(val as i32), "wating event error"));
-            //     }
-            // };
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            match WaitForSingleObject(self.wasapi_event_hanle, INFINITE) {
+                windows::Win32::Foundation::WAIT_OBJECT_0 => {}
+                WAIT_EVENT(val) => {
+                    return Err(Error::new(HRESULT(val as i32), "wating event error"));
+                }
+            };
+            //tokio::time::sleep(Duration::from_millis(10)).await;
 
             let padding = self.audio_client.GetCurrentPadding()?;
             let available = self.buffer_frame_count - padding;
@@ -170,7 +165,6 @@ impl<'a> AudioOutput<'a> {
             }
 
             let output_buffer = {
-                println!("before get ptr");
                 let ptr = self.render_client.GetBuffer(available);
                 let ptr = match ptr {
                     Err(e) => {
@@ -179,29 +173,19 @@ impl<'a> AudioOutput<'a> {
                     }
                     x => x.unwrap(),
                 };
-                println!("after get ptr");
                 unsafe { std::slice::from_raw_parts_mut(ptr as *mut f32, available as usize * 2) }
             };
-            println!("after output buffer");
+
             let get_block =
                 |read_exclusive| &self.shared_buffer.channel_left_data[read_exclusive as usize];
 
             let mut fill_buff_within_block = || {
                 let src_slice_ch_0 = &get_block(read_exclusive)[head..head + available as usize];
 
-                let channel_combined_view = &mut channel_combined_buf[0..available as usize * 2];
-
                 for i in 0..src_slice_ch_0.len() {
-                    channel_combined_view[i * 2] = src_slice_ch_0[i];
-                    channel_combined_view[i * 2 + 1] = src_slice_ch_0[i];
+                    output_buffer[i * 2] = src_slice_ch_0[i];
+                    output_buffer[i * 2 + 1] = src_slice_ch_0[i];
                 }
-                println!("avaliable: {}", available);
-                println!("output_buffer.len(): {}", output_buffer.len());
-                println!(
-                    "channel_combined_buf.len(): {}",
-                    channel_combined_view.len()
-                );
-                output_buffer.copy_from_slice(&channel_combined_view);
             };
             let target_len = head + available as usize;
 
@@ -210,8 +194,8 @@ impl<'a> AudioOutput<'a> {
                 Less => {
                     fill_buff_within_block();
                     head = head + available as usize;
-                    dbg!(&output_buffer[0..10]);
-                    println!("less");
+
+                    //println!("less");
                 }
                 Equal => {
                     fill_buff_within_block();
@@ -219,49 +203,39 @@ impl<'a> AudioOutput<'a> {
 
                     read_exclusive = next_block(read_exclusive);
                     head = 0;
-                    println!("equal");
+                    //println!("equal");
                 }
                 Greater => {
-                    println!("Grater");
-                    
-
-                    let src_slice_current_ch_0 = &get_block(read_exclusive)[head..];
-                    let channel_combined_view =
-                        &mut channel_combined_buf[0..available as usize * 2];
-
-                    for i in 0..src_slice_current_ch_0.len() {
-                        channel_combined_view[i * 2] = src_slice_current_ch_0[i];
-                        channel_combined_view[i * 2 + 1] = src_slice_current_ch_0[i];
+                    //println!("Greater");
+                    {
+                        let src_slice_current_ch_0 = &get_block(read_exclusive)[head..];
+                        for i in 0..src_slice_current_ch_0.len() {
+                            output_buffer[i * 2] = src_slice_current_ch_0[i];
+                            output_buffer[i * 2 + 1] = src_slice_current_ch_0[i];
+                        }
                     }
 
-                    let output_buff_spilt_len = src_slice_current_ch_0.len() * 2;
-
-                    output_buffer[0..output_buff_spilt_len].copy_from_slice(
-                        &channel_combined_view[0..output_buff_spilt_len],
-                    );
                     singnal_to_thread().await;
                     read_exclusive = next_block(read_exclusive);
 
-                    let src_slice_spill_over_ch_0 = &get_block(read_exclusive)
-                        [0..head + available as usize - get_block(read_exclusive).len()];
+                    let spill_over_len = head + available as usize - BLOCK_SIZE;
+                    {
+                        let src_slice_spill_over_ch_0 =
+                            &get_block(read_exclusive)[0..spill_over_len];
 
-                    assert!(src_slice_spill_over_ch_0.len() < get_block(read_exclusive).len());
-
-                    for i in 0..src_slice_spill_over_ch_0.len() {
-                        channel_combined_view[i * 2 + src_slice_current_ch_0.len()] =
-                            src_slice_spill_over_ch_0[i];
-                        channel_combined_view[i * 2 + 1 + src_slice_current_ch_0.len()] =
-                            src_slice_spill_over_ch_0[i];
+                        assert!(src_slice_spill_over_ch_0.len() < BLOCK_SIZE);
+                        let split_len = BLOCK_SIZE - head;
+                        for i in 0..src_slice_spill_over_ch_0.len() {
+                            output_buffer[i * 2 + split_len] = src_slice_spill_over_ch_0[i];
+                            output_buffer[i * 2 + 1 + split_len] = src_slice_spill_over_ch_0[i];
+                        }
                     }
 
-                    output_buffer[output_buff_spilt_len..].copy_from_slice(&channel_combined_view[output_buff_spilt_len..]);
-
-                    head = src_slice_spill_over_ch_0.len();
+                    head = spill_over_len;
                 }
             };
-            println!("match end");
+
             self.render_client.ReleaseBuffer(available, 0)?;
-            println!("buffer released ");
         }
 
         //sleep(Duration::from_millis(500));
