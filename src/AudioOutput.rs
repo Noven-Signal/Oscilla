@@ -140,7 +140,7 @@ impl<'a> AudioOutput<'a> {
         };
 
         let mut head: usize = 0;
-        let mut read_exclusive = 0;
+        let mut read_exclusive: usize = 0;
         let mut count = 0;
 
         'l1: loop {
@@ -158,14 +158,14 @@ impl<'a> AudioOutput<'a> {
             //tokio::time::sleep(Duration::from_millis(10)).await;
 
             let padding = self.audio_client.GetCurrentPadding()?;
-            let available = self.buffer_frame_count - padding;
+            let available = (self.buffer_frame_count - padding) as usize;
 
             if available == 0 {
                 continue 'l1;
             }
 
             let output_buffer = {
-                let ptr = self.render_client.GetBuffer(available);
+                let ptr = self.render_client.GetBuffer(available as u32);
                 let ptr = match ptr {
                     Err(e) => {
                         dbg!(e);
@@ -173,27 +173,33 @@ impl<'a> AudioOutput<'a> {
                     }
                     x => x.unwrap(),
                 };
-                unsafe { std::slice::from_raw_parts_mut(ptr as *mut f32, available as usize * 2) }
+                unsafe { std::slice::from_raw_parts_mut(ptr as *mut f32, available * 2) }
             };
 
-            let get_block =
-                |read_exclusive| &self.shared_buffer.channel_left_data[read_exclusive as usize];
+            macro_rules! dec_get_block_clo {
+                ($ident: ident,$tt:tt) => {
+                    let $ident = |read_exclusive: usize| &self.shared_buffer.$tt[read_exclusive];
+                };
+            }
+            dec_get_block_clo!(get_block_left, channel_left_data);
+            dec_get_block_clo!(get_block_right, channel_right_data);
 
             let mut fill_buff_within_block = || {
-                let src_slice_ch_0 = &get_block(read_exclusive)[head..head + available as usize];
+                let src_slice_ch_0 = &get_block_left(read_exclusive)[head..head + available];
+                let src_slice_ch_1 = &get_block_right(read_exclusive)[head..head + available];
 
                 for i in 0..src_slice_ch_0.len() {
                     output_buffer[i * 2] = src_slice_ch_0[i];
-                    output_buffer[i * 2 + 1] = src_slice_ch_0[i];
+                    output_buffer[i * 2 + 1] = src_slice_ch_1[i];
                 }
             };
-            let target_len = head + available as usize;
+            let target_len = head + available;
 
             use std::cmp::Ordering::*;
-            match Ord::cmp(&target_len, &get_block(read_exclusive).len()) {
+            match Ord::cmp(&target_len, &BLOCK_SIZE) {
                 Less => {
                     fill_buff_within_block();
-                    head = head + available as usize;
+                    head = head + available;
 
                     //println!("less");
                 }
@@ -208,26 +214,30 @@ impl<'a> AudioOutput<'a> {
                 Greater => {
                     //println!("Greater");
                     {
-                        let src_slice_current_ch_0 = &get_block(read_exclusive)[head..];
+                        let src_slice_current_ch_0 = &get_block_left(read_exclusive)[head..];
+                        let src_slice_current_ch_1 = &get_block_right(read_exclusive)[head..];
+
                         for i in 0..src_slice_current_ch_0.len() {
                             output_buffer[i * 2] = src_slice_current_ch_0[i];
-                            output_buffer[i * 2 + 1] = src_slice_current_ch_0[i];
+                            output_buffer[i * 2 + 1] = src_slice_current_ch_1[i];
                         }
                     }
 
                     singnal_to_thread().await;
                     read_exclusive = next_block(read_exclusive);
 
-                    let spill_over_len = head + available as usize - BLOCK_SIZE;
+                    let spill_over_len = head + available - BLOCK_SIZE;
                     {
                         let src_slice_spill_over_ch_0 =
-                            &get_block(read_exclusive)[0..spill_over_len];
+                            &get_block_left(read_exclusive)[0..spill_over_len];
+                        let src_slice_spill_over_ch_1 =
+                            &get_block_left(read_exclusive)[0..spill_over_len];
 
                         assert!(src_slice_spill_over_ch_0.len() < BLOCK_SIZE);
                         let split_len = BLOCK_SIZE - head;
                         for i in 0..src_slice_spill_over_ch_0.len() {
                             output_buffer[i * 2 + split_len] = src_slice_spill_over_ch_0[i];
-                            output_buffer[i * 2 + 1 + split_len] = src_slice_spill_over_ch_0[i];
+                            output_buffer[i * 2 + 1 + split_len] = src_slice_spill_over_ch_1[i];
                         }
                     }
 
@@ -235,7 +245,7 @@ impl<'a> AudioOutput<'a> {
                 }
             };
 
-            self.render_client.ReleaseBuffer(available, 0)?;
+            self.render_client.ReleaseBuffer(available as u32, 0)?;
         }
 
         //sleep(Duration::from_millis(500));

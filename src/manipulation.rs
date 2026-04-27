@@ -1,7 +1,10 @@
 use std::{
     fmt::Debug,
     panic,
-    sync::{Arc, atomic::{AtomicPtr, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicPtr, Ordering},
+    },
     time::Duration,
 };
 
@@ -43,10 +46,7 @@ pub struct SharedBuffer {
     pub decoder_to_renderer_sender: UnboundedSender<SendSignal>,
     pub decoder_to_renderer_reciever: UnboundedReceiver<SendSignal>,
 }
-unsafe impl Send for SharedBuffer  {
-   
-}
-
+unsafe impl Send for SharedBuffer {}
 
 pub const BLOCK_SIZE: usize = 100 * 1024;
 
@@ -111,7 +111,9 @@ pub async fn play_executor(playback_file_path: &str) {
     let renderer_handle = tokio::spawn(async move {
         let shared_buffer = retrieve_ref(shared_buffer_for_renderer);
         let cancellation_token = CancellationToken::new();
-        AudioOutput::main(shared_buffer, cancellation_token).await.unwrap();
+        AudioOutput::main(shared_buffer, cancellation_token)
+            .await
+            .unwrap();
         //let res = res.ok();
     });
 
@@ -148,55 +150,92 @@ async fn append_decode_buffer(
         match decoded {
             DecodeResult::Buf(audio_buffer_ref) => match audio_buffer_ref {
                 F32(cow) => {
+                    macro_rules! exclusize_buf_ref_mut {
+                        ($channel: tt,$write_exclusive:expr) => {
+                            &mut shared_buffer.$channel[write_exclusive]
+                        };
+                    }
+
                     let view_0 = cow.chan(0);
+                    let view_1 = cow.chan(1);
+
+                    let mut fill_buff_within_block = || {
+                        let copy_buff = |exclusive_buf: &mut [f32], view: &[f32]| {
+                            let target_slice = &mut exclusive_buf[head..head + view.len()];
+                            target_slice.copy_from_slice(view);
+                        };
+
+                        let exclusive_buf_left =
+                            exclusize_buf_ref_mut!(channel_left_data, write_exclusive);
+                        let exclusive_buf_right =
+                            exclusize_buf_ref_mut!(channel_right_data, write_exclusive);
+
+                        copy_buff(exclusive_buf_left, view_0);
+                        copy_buff(exclusive_buf_right, view_1);
+                    };
 
                     let target_len = head + view_0.len();
 
                     use std::cmp::Ordering::*;
                     match Ord::cmp(&target_len, &BLOCK_SIZE) {
                         Less => {
-                            let exclusive_buf =
-                                &mut shared_buffer.channel_left_data[write_exclusive as usize];
-
-                            let target_slice = &mut exclusive_buf[head..head + view_0.len()];
-
-                            target_slice.copy_from_slice(view_0);
-
+                            fill_buff_within_block();
                             head = head + view_0.len();
                         }
                         Equal => {
-                            let exclusive_buf =
-                                &mut shared_buffer.channel_left_data[write_exclusive as usize];
-                            let target_slice = &mut exclusive_buf[head..];
-
-                            target_slice.copy_from_slice(view_0);
-
+                            fill_buff_within_block();
                             singnal_to_thread().await;
+
                             write_exclusive = next_block(write_exclusive);
                             head = 0;
                         }
                         Greater => {
-                            let exclusive_buf_left =
-                                &mut shared_buffer.channel_left_data[write_exclusive as usize];
-                            let target_slice_spill_over = &mut exclusive_buf_left[head..];
+                            fn fill_current_block_buff<'a>(
+                                head: usize,
+                                exclusive_buf: &mut [f32],
+                                view: &'a [f32],
+                            ) -> &'a [f32] {
+                                let target_slice_spill_over = &mut exclusive_buf[head..];
 
-                            let block_len = BLOCK_SIZE;
-                            let this_iter_fill = block_len - head;
+                                let (current_view, spill_over_view) =
+                                    view.split_at(BLOCK_SIZE - head);
+                                target_slice_spill_over.copy_from_slice(current_view);
 
-                            let (current_view0, spill_over_view0) = view_0.split_at(this_iter_fill);
-                            target_slice_spill_over.copy_from_slice(current_view0);
+                                spill_over_view
+                            }
+
+                            let spill_over_ch_0 = fill_current_block_buff(
+                                head,
+                                exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
+                                view_0,
+                            );
+                            let spill_over_ch_1 = fill_current_block_buff(
+                                head,
+                                exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
+                                view_1,
+                            );
 
                             singnal_to_thread().await;
                             write_exclusive = next_block(write_exclusive);
 
-                            let exclusive_buf_spill_over =
-                                &mut shared_buffer.channel_left_data[write_exclusive as usize];
+                            let fill_spill_over_block_buff =
+                                |exclusive_buf_spill_over: &mut [f32], spill_over_view: &[f32]| {
+                                    let target_slice_spill_over =
+                                        &mut exclusive_buf_spill_over[0..spill_over_view.len()];
 
-                            let target_slice_spill_over =
-                                &mut exclusive_buf_spill_over[0..spill_over_view0.len()];
+                                    target_slice_spill_over.copy_from_slice(spill_over_view);
+                                };
 
-                            target_slice_spill_over.copy_from_slice(spill_over_view0);
-                            head = spill_over_view0.len();
+                            fill_spill_over_block_buff(
+                                exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
+                                spill_over_ch_0,
+                            );
+                            fill_spill_over_block_buff(
+                                exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
+                                spill_over_ch_1,
+                            );
+
+                            head = spill_over_ch_0.len();
                         }
                     }
                 }
@@ -205,7 +244,7 @@ async fn append_decode_buffer(
             DecodeResult::Err(error) => {
                 return;
                 //println!("error: {error}")
-            },
+            }
             DecodeResult::EndOfStream => break 'l1,
             DecodeResult::None => continue,
         }
