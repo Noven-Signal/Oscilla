@@ -212,6 +212,7 @@ impl<'a> AudioOutput<'a> {
                     output_buffer[i * 2 + 1] = src_slice_ch_1[i] * vol;
                 }
             };
+
             let target_len = head + available;
 
             use std::cmp::Ordering::*;
@@ -247,19 +248,21 @@ impl<'a> AudioOutput<'a> {
 
                     let spill_over_len = head + available - BLOCK_SIZE;
                     {
+                        assert!(spill_over_len < BLOCK_SIZE);
+
                         let src_slice_spill_over_ch_0 =
                             &get_block_left(read_exclusive)[0..spill_over_len];
                         let src_slice_spill_over_ch_1 =
                             &get_block_left(read_exclusive)[0..spill_over_len];
 
-                        assert!(src_slice_spill_over_ch_0.len() < BLOCK_SIZE);
                         let split_len = BLOCK_SIZE - head;
                         for i in 0..src_slice_spill_over_ch_0.len() {
-                            output_buffer[i * 2 + split_len] = src_slice_spill_over_ch_0[i] * vol;
-                            output_buffer[i * 2 + 1 + split_len] = src_slice_spill_over_ch_1[i] * vol;
+                            output_buffer[i * 2 + split_len * 2] =
+                                src_slice_spill_over_ch_0[i] * vol;
+                            output_buffer[i * 2 + 1 + split_len * 2] =
+                                src_slice_spill_over_ch_1[i] * vol;
                         }
                     }
-
                     head = spill_over_len;
                 }
             };
