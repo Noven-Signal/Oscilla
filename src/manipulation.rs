@@ -4,8 +4,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicPtr, Ordering},
-    },
-    time::Duration,
+    }, time::Duration
 };
 
 use symphonia::{
@@ -36,15 +35,17 @@ use crate::{
 
 pub struct DecoderRendererSyncSignal();
 
+#[derive(Debug)]
 pub enum RendererControlSignal {
     SetVol(u16),
     Pause,
-    Resume
+    Resume,
 }
+#[derive(Debug)]
 pub enum PlayerControlSignal {
     SetVol(u16),
     Pause,
-    Resume
+    Resume,
 }
 pub type ChannelData = [Vec<f32>; 8];
 
@@ -58,7 +59,8 @@ pub struct SharedBuffer {
 }
 unsafe impl Send for SharedBuffer {}
 
-pub const BLOCK_SIZE: usize = 100 * 1024;
+pub const BLOCK_SIZE: usize = 40 * 1024;
+pub const CHANNEL: usize = 2;
 
 pub async fn play_executor(
     playback_file_path: &str,

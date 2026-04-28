@@ -142,7 +142,7 @@ pub mod AppState {
 
     pub enum PlayState {
         Playing(usize),
-        Pause(usize),
+        Paused(usize),
         Stop,
     }
 

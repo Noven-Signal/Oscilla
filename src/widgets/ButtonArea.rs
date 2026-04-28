@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, LineGauge};
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::AppState::AppState::{AppStateContainer, AreaHandler, TabState, Tabs};
+use crate::AppState::AppState::{AppStateContainer, AreaHandler, PlayState, TabState, Tabs};
 use crate::extensions::OnceLock::OnceLock_ext;
 
 use crate::widgets::Button::{Button, ButtonIdent};
@@ -84,19 +84,21 @@ impl AreaHandler for ButtonsArea {
                 let Some(sender) = sender_app_container else {
                     break 'play_arm;
                 };
-                let player_control_signal = match player_button_state {
-                    PlayButtonState::Playing => PlayerControlSignal::Pause,
-                    PlayButtonState::Paused => PlayerControlSignal::Resume,
+                let play_state = &mut app_state_container.play_list_playing;
+                let player_control_signal = match play_state {
+                    PlayState::Playing(_) => PlayerControlSignal::Pause,
+                    PlayState::Paused(_) => PlayerControlSignal::Resume,
+                    _ => panic!(),
                 };
+
                 if let Err(_) = sender.send(player_control_signal) {
                     *sender_app_container = None;
                 }
 
-                let play_state = &mut app_state_container.play_list_playing;
                 use crate::AppState::AppState::PlayState::*;
                 *play_state = match play_state {
-                    Playing(idx) => Pause(*idx),
-                    Pause(idx) => Playing(*idx),
+                    Playing(idx) => Paused(*idx),
+                    Paused(idx) => Playing(*idx),
                     Stop => todo!(),
                 };
             }

@@ -14,7 +14,7 @@ use windows::{
 };
 
 use crate::manipulation::{
-    BLOCK_SIZE, DecoderRendererSyncSignal, RendererControlSignal, SharedBuffer,
+    BLOCK_SIZE, CHANNEL, DecoderRendererSyncSignal, RendererControlSignal, SharedBuffer,
 };
 
 pub async fn main(
@@ -146,21 +146,27 @@ impl<'a> AudioOutput<'a> {
         let mut vol = 1f32;
 
         'l1: loop {
+            let mut paused = false;
             'control_singal_loop: loop {
-                if self.control_signal_receiver.is_empty() {
+                if self.control_signal_receiver.is_empty() && !paused {
                     break 'control_singal_loop;
                 }
 
-                match self.control_signal_receiver.recv().await {
+                let reciever = &mut self.control_signal_receiver;
+                match reciever.recv().await {
                     Some(RendererControlSignal::SetVol(set_vol)) => {
                         vol = set_vol as f32 / 100f32;
-                        break 'control_singal_loop;
+                        continue 'control_singal_loop;
                     }
                     Some(RendererControlSignal::Pause) => {
-                        match self.control_signal_receiver.recv().await {
-                            Some(RendererControlSignal::Resume) => {}
-                            _ => break 'control_singal_loop,
-                        }
+                        self.audio_client.Stop()?;
+                        paused = true;
+                        continue 'control_singal_loop;
+                    }
+                    Some(RendererControlSignal::Resume) => {
+                        self.audio_client.Start()?;
+                        paused = false;
+                        continue 'control_singal_loop;
                     }
                     _ => break 'l1,
                 }
@@ -192,7 +198,7 @@ impl<'a> AudioOutput<'a> {
                     }
                     x => x.unwrap(),
                 };
-                unsafe { std::slice::from_raw_parts_mut(ptr as *mut f32, available * 2) }
+                unsafe { std::slice::from_raw_parts_mut(ptr as *mut f32, available * CHANNEL) }
             };
 
             macro_rules! dec_get_block_clo {
@@ -208,8 +214,8 @@ impl<'a> AudioOutput<'a> {
                 let src_slice_ch_1 = &get_block_right(read_exclusive)[head..head + available];
 
                 for i in 0..src_slice_ch_0.len() {
-                    output_buffer[i * 2] = src_slice_ch_0[i] * vol;
-                    output_buffer[i * 2 + 1] = src_slice_ch_1[i] * vol;
+                    output_buffer[i * CHANNEL] = src_slice_ch_0[i] * vol;
+                    output_buffer[i * CHANNEL + 1] = src_slice_ch_1[i] * vol;
                 }
             };
 
@@ -220,7 +226,6 @@ impl<'a> AudioOutput<'a> {
                 Less => {
                     fill_buff_within_block();
                     head = head + available;
-
                     //println!("less");
                 }
                 Equal => {
@@ -232,14 +237,13 @@ impl<'a> AudioOutput<'a> {
                     //println!("equal");
                 }
                 Greater => {
-                   // println!("Greater");
                     {
                         let src_slice_current_ch_0 = &get_block_left(read_exclusive)[head..];
                         let src_slice_current_ch_1 = &get_block_right(read_exclusive)[head..];
 
                         for i in 0..src_slice_current_ch_0.len() {
-                            output_buffer[i * 2] = src_slice_current_ch_0[i] * vol;
-                            output_buffer[i * 2 + 1] = src_slice_current_ch_1[i] * vol;
+                            output_buffer[i * CHANNEL] = src_slice_current_ch_0[i] * vol;
+                            output_buffer[i * CHANNEL + 1] = src_slice_current_ch_1[i] * vol;
                         }
                     }
 
@@ -253,16 +257,25 @@ impl<'a> AudioOutput<'a> {
                         let src_slice_spill_over_ch_0 =
                             &get_block_left(read_exclusive)[0..spill_over_len];
                         let src_slice_spill_over_ch_1 =
-                            &get_block_left(read_exclusive)[0..spill_over_len];
+                            &get_block_right(read_exclusive)[0..spill_over_len];
 
-                        let split_len = BLOCK_SIZE - head;
+                        let split_len_channel_combined = {
+                            let split_len_ch = BLOCK_SIZE - head;
+                            split_len_ch * CHANNEL
+                        };
                         for i in 0..src_slice_spill_over_ch_0.len() {
-                            output_buffer[i * 2 + split_len * 2] =
+                            // if i == 0 {
+                            //     dbg!(x);
+                            //     dbg!(i * CHANNEL + split_len_channel_combined);
+                            // }
+
+                            output_buffer[i * CHANNEL + split_len_channel_combined] =
                                 src_slice_spill_over_ch_0[i] * vol;
-                            output_buffer[i * 2 + 1 + split_len * 2] =
+                            output_buffer[i * CHANNEL + 1 + split_len_channel_combined] =
                                 src_slice_spill_over_ch_1[i] * vol;
                         }
                     }
+                    //dbg!(&output_buffer[spill_over_len-10..spill_over_len+10]);
                     head = spill_over_len;
                 }
             };

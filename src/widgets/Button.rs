@@ -42,7 +42,7 @@ impl PlayButtonState {
         use crate::AppState::AppState::PlayState::*;
         match app_state_container.play_list_playing {
             Playing(_) => Self::Playing,
-            Pause(_) => Self::Paused,
+            Paused(_) => Self::Paused,
             Stop => todo!(),
         }
     }
