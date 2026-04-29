@@ -146,6 +146,16 @@ pub mod AppState {
         Stop,
     }
 
+    impl PlayState {
+        pub fn to_play_button_state(&self)->PlayButtonState{
+            match self{
+                PlayState::Playing(_) => PlayButtonState::Playing,
+                PlayState::Paused(_) => PlayButtonState::Paused,
+                PlayState::Stop => todo!(),
+            }
+        }
+    }
+
     //type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
     pub struct AppStateContainer {
         pub focus_state: TabState,
@@ -153,7 +163,7 @@ pub mod AppState {
         pub vol_state: u16,
         pub play_list: Vec<String>,
         pub play_list_selected: ListState,
-        pub play_list_playing: PlayState,
+        pub play_state: PlayState,
         pub player_control_singnal_sender: Option<UnboundedSender<PlayerControlSignal>>,
     }
 
@@ -167,7 +177,7 @@ pub mod AppState {
                 play_list: list,
                 vol_state: 100,
                 play_list_selected: ListState::default(),
-                play_list_playing: PlayState::Stop,
+                play_state: PlayState::Stop,
                 player_control_singnal_sender: None,
             }
         }

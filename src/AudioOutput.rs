@@ -264,18 +264,12 @@ impl<'a> AudioOutput<'a> {
                             split_len_ch * CHANNEL
                         };
                         for i in 0..src_slice_spill_over_ch_0.len() {
-                            // if i == 0 {
-                            //     dbg!(x);
-                            //     dbg!(i * CHANNEL + split_len_channel_combined);
-                            // }
-
                             output_buffer[i * CHANNEL + split_len_channel_combined] =
                                 src_slice_spill_over_ch_0[i] * vol;
                             output_buffer[i * CHANNEL + 1 + split_len_channel_combined] =
                                 src_slice_spill_over_ch_1[i] * vol;
                         }
                     }
-                    //dbg!(&output_buffer[spill_over_len-10..spill_over_len+10]);
                     head = spill_over_len;
                 }
             };

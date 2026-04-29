@@ -32,7 +32,7 @@ pub enum ButtonIdent {
     Next,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy,Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum PlayButtonState {
     Playing,
     Paused,
@@ -40,13 +40,12 @@ pub enum PlayButtonState {
 impl PlayButtonState {
     pub fn new(app_state_container: &AppStateContainer) -> Self {
         use crate::AppState::AppState::PlayState::*;
-        match app_state_container.play_list_playing {
+        match app_state_container.play_state {
             Playing(_) => Self::Playing,
             Paused(_) => Self::Paused,
             Stop => todo!(),
         }
     }
-
 }
 impl ButtonIdent {
     const fn get_disp_name(&self) -> &'static str {
@@ -56,10 +55,6 @@ impl ButtonIdent {
             ButtonIdent::Prev => "prev",
             ButtonIdent::Next => "next",
         }
-    }
-
-    pub fn get_default_play_ident(app_state_container: &AppStateContainer) -> Self {
-        ButtonIdent::PlayOrPause(PlayButtonState::new(app_state_container))
     }
 
     pub fn get_next_focus(
@@ -76,7 +71,9 @@ impl ButtonIdent {
                 _ => None,
             },
             Prev => match key_code {
-                KeyCode::Left => Some(Self::get_default_play_ident(app_state_container)),
+                KeyCode::Left => Some(Self::PlayOrPause(
+                    app_state_container.play_state.to_play_button_state(),
+                )),
                 KeyCode::Right => Some(Next),
                 _ => None,
             },

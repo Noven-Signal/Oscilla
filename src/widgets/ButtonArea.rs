@@ -44,7 +44,7 @@ impl StatefulWidget for ButtonsArea {
             };
         }
         Button::new(
-            ButtonIdent::get_default_play_ident(state),
+            ButtonIdent::PlayOrPause(state.play_state.to_play_button_state()),
             match_state!(ButtonIdent::PlayOrPause(_)),
         )
         .render(play_button_area, buf, state);
@@ -65,7 +65,7 @@ impl StatefulWidget for ButtonsArea {
 impl AreaHandler for ButtonsArea {
     fn get_tab_selected_handler(app_state_container: &mut AppStateContainer) {
         app_state_container.button_focus_state =
-            ButtonIdent::get_default_play_ident(app_state_container);
+            ButtonIdent::PlayOrPause(app_state_container.play_state.to_play_button_state());
     }
 
     fn handle_key(app_state_container: &mut AppStateContainer, key_code: KeyCode) {
@@ -84,7 +84,7 @@ impl AreaHandler for ButtonsArea {
                 let Some(sender) = sender_app_container else {
                     break 'play_arm;
                 };
-                let play_state = &mut app_state_container.play_list_playing;
+                let play_state = &mut app_state_container.play_state;
                 let player_control_signal = match play_state {
                     PlayState::Playing(_) => PlayerControlSignal::Pause,
                     PlayState::Paused(_) => PlayerControlSignal::Resume,

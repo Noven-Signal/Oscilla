@@ -54,7 +54,7 @@ async fn main() -> color_eyre::Result<()> {
 
    
     let mut app_state_container = AppStateContainer::new(filtered_args);
-    app_state_container.play_list_playing = PlayState::Playing(0);
+    app_state_container.play_state = PlayState::Playing(0);
     let (player_control_signal_sender,mut player_control_signal_recv) = unbounded_channel::<PlayerControlSignal>();
     app_state_container.player_control_singnal_sender = Some(player_control_signal_sender);
     let initial_play_thread_handle = tokio::spawn(async move {

@@ -4,7 +4,8 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicPtr, Ordering},
-    }, time::Duration
+    },
+    time::Duration,
 };
 
 use symphonia::{
@@ -128,7 +129,9 @@ pub async fn play_executor(
     let renderer_handle = tokio::spawn(async move {
         let shared_buffer = retrieve_ref(shared_buffer_for_renderer);
 
-        AudioOutput::main(shared_buffer, renderer_control_signal_recv).await.unwrap();
+        AudioOutput::main(shared_buffer, renderer_control_signal_recv)
+            .await
+            .unwrap();
         //let res = res.ok();
     });
 
@@ -137,7 +140,7 @@ pub async fn play_executor(
             Some(PlayerControlSignal::SetVol(vol)) => RendererControlSignal::SetVol(vol),
             Some(PlayerControlSignal::Pause) => RendererControlSignal::Pause,
             Some(PlayerControlSignal::Resume) => RendererControlSignal::Resume,
-            
+
             None => break 'l1,
         };
         renderer_control_signal_sender.send(map_signal);
