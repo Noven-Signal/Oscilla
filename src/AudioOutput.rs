@@ -1,5 +1,7 @@
 use core::panic;
 use core::result::Result::Ok;
+use std::cmp;
+use std::time::Duration;
 
 use imp::CreateEventW;
 use std::ops::Range;
@@ -132,12 +134,10 @@ impl<'a> AudioOutput<'a> {
         };
 
         let mut singnal_to_thread = async || {
-            // let mut write_end = &write_end;
             let reciever = &mut self.shared_buffer.decoder_to_renderer_reciever;
             reciever.recv().await;
-
             let sender = &mut self.shared_buffer.renderer_to_decoder_sender;
-            sender.send(DecoderRendererSyncSignal());
+            sender.send(DecoderRendererSyncSignal()).unwrap();
         };
 
         let mut head: usize = 0;
@@ -145,7 +145,9 @@ impl<'a> AudioOutput<'a> {
         let mut count = 0;
         let mut vol = 1f32;
 
+        singnal_to_thread().await;
         'l1: loop {
+            tokio::time::sleep(Duration::ZERO).await;
             let mut paused = false;
             'control_singal_loop: loop {
                 if self.control_signal_receiver.is_empty() && !paused {
@@ -183,11 +185,11 @@ impl<'a> AudioOutput<'a> {
             //tokio::time::sleep(Duration::from_millis(10)).await;
 
             let padding = self.audio_client.GetCurrentPadding()?;
-            let available = (self.buffer_frame_count - padding) as usize;
-
-            if available == 0 {
+            let os_available = (self.buffer_frame_count - padding) as usize;
+            if os_available == 0 {
                 continue 'l1;
             }
+            let available = cmp::min(os_available, BLOCK_SIZE);
 
             let output_buffer = {
                 let ptr = self.render_client.GetBuffer(available as u32);

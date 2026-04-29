@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use futures::{future::join, join};
 use symphonia::{
     core::{audio::Signal, io::MediaSourceStream, probe::Hint},
     default::get_probe,
@@ -60,7 +61,7 @@ pub struct SharedBuffer {
 }
 unsafe impl Send for SharedBuffer {}
 
-pub const BLOCK_SIZE: usize = 40 * 1024;
+pub const BLOCK_SIZE: usize = 16 * 1024;
 pub const CHANNEL: usize = 2;
 
 pub async fn play_executor(
@@ -146,10 +147,10 @@ pub async fn play_executor(
         renderer_control_signal_sender.send(map_signal);
     }
 
-    decoder_handle.await;
-    renderer_handle.await;
+    
+    join!(decoder_handle,renderer_handle);
 
-    tokio::time::sleep(Duration::from_secs(u64::MAX)).await;
+    //tokio::time::sleep(Duration::from_secs(u64::MAX)).await;
 }
 
 async fn append_decode_buffer(
@@ -166,13 +167,14 @@ async fn append_decode_buffer(
         reciever.recv().await;
 
         let sender = &mut shared_buffer.decoder_to_renderer_sender;
-        sender.send(DecoderRendererSyncSignal());
+        sender.send(DecoderRendererSyncSignal()).unwrap();
     };
 
-    let mut write_exclusive: usize = 1;
+    let mut write_exclusive: usize = 0;
 
     let mut head: usize = 0;
     'l1: loop {
+       tokio::time::sleep(Duration::ZERO).await;
         let decoded = decoder_wrapper.decode();
 
         use symphonia::core::audio::AudioBufferRef::*;
@@ -243,7 +245,6 @@ async fn append_decode_buffer(
                                 exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
                                 view_1,
                             );
-
                             singnal_to_thread().await;
                             write_exclusive = next_block(write_exclusive);
 
