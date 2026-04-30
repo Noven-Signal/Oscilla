@@ -119,20 +119,18 @@ pub async fn play_executor(
         atomic_ptr.load(Ordering::Acquire).as_mut().unwrap()
     };
 
-    let decoder_handle = tokio::spawn(async move {
+    let decoder_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = retrieve_ref(shared_buffer_for_decoder);
-        append_decode_buffer(&mut decoder_wrapper, shared_buffer).await;
+        append_decode_buffer(&mut decoder_wrapper, shared_buffer);
     });
 
     let (renderer_control_signal_sender, renderer_control_signal_recv) =
         unbounded_channel::<RendererControlSignal>();
 
-    let renderer_handle = tokio::spawn(async move {
+    let renderer_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = retrieve_ref(shared_buffer_for_renderer);
 
-        AudioOutput::main(shared_buffer, renderer_control_signal_recv)
-            .await
-            .unwrap();
+        AudioOutput::main(shared_buffer, renderer_control_signal_recv).unwrap();
         //let res = res.ok();
     });
 
@@ -147,34 +145,31 @@ pub async fn play_executor(
         renderer_control_signal_sender.send(map_signal);
     }
 
-    
-    join!(decoder_handle,renderer_handle);
+    join!(decoder_handle, renderer_handle);
 
     //tokio::time::sleep(Duration::from_secs(u64::MAX)).await;
 }
 
-async fn append_decode_buffer(
-    decoder_wrapper: &mut DecoderWrapper,
-    shared_buffer: &mut SharedBuffer,
-) {
+fn append_decode_buffer(decoder_wrapper: &mut DecoderWrapper, shared_buffer: &mut SharedBuffer) {
     let next_block = |write_end| match write_end {
         7 => 0,
         write_end => write_end + 1,
     };
 
-    let mut singnal_to_thread = async || {
+    let mut singnal_to_thread = || {
         let reciever = &mut shared_buffer.renderer_to_docoder_reciever;
-        reciever.recv().await;
+        reciever.blocking_recv();
 
         let sender = &mut shared_buffer.decoder_to_renderer_sender;
         sender.send(DecoderRendererSyncSignal()).unwrap();
     };
 
     let mut write_exclusive: usize = 0;
-
+    let mut count = 0;
     let mut head: usize = 0;
     'l1: loop {
-       tokio::time::sleep(Duration::ZERO).await;
+        count = count + 1;
+        //tokio::time::sleep(Duration::ZERO).await;
         let decoded = decoder_wrapper.decode();
 
         use symphonia::core::audio::AudioBufferRef::*;
@@ -215,7 +210,7 @@ async fn append_decode_buffer(
                         }
                         Equal => {
                             fill_buff_within_block();
-                            singnal_to_thread().await;
+                            singnal_to_thread();
 
                             write_exclusive = next_block(write_exclusive);
                             head = 0;
@@ -245,7 +240,8 @@ async fn append_decode_buffer(
                                 exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
                                 view_1,
                             );
-                            singnal_to_thread().await;
+                            singnal_to_thread();
+                            
                             write_exclusive = next_block(write_exclusive);
 
                             let fill_spill_over_block_buff =

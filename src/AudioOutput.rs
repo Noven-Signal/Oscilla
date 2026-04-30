@@ -19,13 +19,13 @@ use crate::manipulation::{
     BLOCK_SIZE, CHANNEL, DecoderRendererSyncSignal, RendererControlSignal, SharedBuffer,
 };
 
-pub async fn main(
+pub fn main(
     shared_buffer: &mut SharedBuffer,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
 ) -> Result<()> {
     unsafe {
         let mut audio_output = AudioOutput::new(shared_buffer, control_signal_receiver)?;
-        audio_output.start().await;
+        audio_output.start();
     }
     Ok(())
 }
@@ -66,9 +66,9 @@ impl<'a> AudioOutput<'a> {
         })
     }
     #[allow(unsafe_op_in_unsafe_fn)]
-    async unsafe fn start(&mut self) -> Result<()> {
+    unsafe fn start(&mut self) -> Result<()> {
         self.audio_client.Start()?;
-        self.render_loop().await?;
+        self.render_loop()?;
         Ok(())
     }
 
@@ -127,15 +127,15 @@ impl<'a> AudioOutput<'a> {
     }
 
     #[allow(unsafe_op_in_unsafe_fn)]
-    async unsafe fn render_loop(&mut self) -> Result<()> {
+    unsafe fn render_loop(&mut self) -> Result<()> {
         let next_block = |read_exclusive| match read_exclusive {
             7 => 0,
             read_exclusive => read_exclusive + 1,
         };
 
-        let mut singnal_to_thread = async || {
+        let mut singnal_to_thread = || {
             let reciever = &mut self.shared_buffer.decoder_to_renderer_reciever;
-            reciever.recv().await;
+            reciever.blocking_recv();
             let sender = &mut self.shared_buffer.renderer_to_decoder_sender;
             sender.send(DecoderRendererSyncSignal()).unwrap();
         };
@@ -145,9 +145,10 @@ impl<'a> AudioOutput<'a> {
         let mut count = 0;
         let mut vol = 1f32;
 
-        singnal_to_thread().await;
+        singnal_to_thread();
         'l1: loop {
-            tokio::time::sleep(Duration::ZERO).await;
+            
+            //tokio::time::sleep(Duration::ZERO).await;
             let mut paused = false;
             'control_singal_loop: loop {
                 if self.control_signal_receiver.is_empty() && !paused {
@@ -155,7 +156,7 @@ impl<'a> AudioOutput<'a> {
                 }
 
                 let reciever = &mut self.control_signal_receiver;
-                match reciever.recv().await {
+                match reciever.blocking_recv() {
                     Some(RendererControlSignal::SetVol(set_vol)) => {
                         vol = set_vol as f32 / 100f32;
                         continue 'control_singal_loop;
@@ -232,7 +233,7 @@ impl<'a> AudioOutput<'a> {
                 }
                 Equal => {
                     fill_buff_within_block();
-                    singnal_to_thread().await;
+                    singnal_to_thread();
 
                     read_exclusive = next_block(read_exclusive);
                     head = 0;
@@ -249,7 +250,8 @@ impl<'a> AudioOutput<'a> {
                         }
                     }
 
-                    singnal_to_thread().await;
+                    singnal_to_thread();
+                    
                     read_exclusive = next_block(read_exclusive);
 
                     let spill_over_len = head + available - BLOCK_SIZE;
