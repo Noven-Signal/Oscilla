@@ -64,6 +64,10 @@ impl DecoderWrapper {
     pub fn decode(&'_ mut self) -> DecodeResult<'_> {
         let packet = match self.reader.next_packet() {
             Ok(p) => p,
+            Err(symphonia::core::errors::Error::IoError(err)) => {
+                //temp EndOfStream
+                return DecodeResult::EndOfStream;
+            }
             Err(err) => return DecodeResult::Err(err),
         };
 

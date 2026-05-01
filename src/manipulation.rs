@@ -59,9 +59,8 @@ pub struct SharedBuffer {
     pub decoder_to_renderer_sender: UnboundedSender<DecoderRendererSyncSignal>,
     pub decoder_to_renderer_reciever: UnboundedReceiver<DecoderRendererSyncSignal>,
 }
-unsafe impl Send for SharedBuffer {}
 
-pub const BLOCK_SIZE: usize = 16 * 1024;
+pub const BLOCK_SIZE: usize = 8 * 1024;
 pub const CHANNEL: usize = 2;
 
 pub async fn play_executor(
@@ -74,7 +73,7 @@ pub async fn play_executor(
         return;
     };
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
-
+    
     let mut hint = Hint::new();
     hint.with_extension("mp3");
     let probe_result = probe.format(&hint, mss, &Default::default(), &Default::default());
@@ -172,16 +171,16 @@ fn append_decode_buffer(decoder_wrapper: &mut DecoderWrapper, shared_buffer: &mu
         //tokio::time::sleep(Duration::ZERO).await;
         let decoded = decoder_wrapper.decode();
 
+        macro_rules! exclusize_buf_ref_mut {
+            ($channel: tt,$write_exclusive:expr) => {
+                &mut shared_buffer.$channel[write_exclusive]
+            };
+        }
+
         use symphonia::core::audio::AudioBufferRef::*;
         match decoded {
             DecodeResult::Buf(audio_buffer_ref) => match audio_buffer_ref {
                 F32(cow) => {
-                    macro_rules! exclusize_buf_ref_mut {
-                        ($channel: tt,$write_exclusive:expr) => {
-                            &mut shared_buffer.$channel[write_exclusive]
-                        };
-                    }
-
                     let view_0 = cow.chan(0);
                     let view_1 = cow.chan(1);
 
@@ -241,7 +240,7 @@ fn append_decode_buffer(decoder_wrapper: &mut DecoderWrapper, shared_buffer: &mu
                                 view_1,
                             );
                             singnal_to_thread();
-                            
+
                             write_exclusive = next_block(write_exclusive);
 
                             let fill_spill_over_block_buff =
@@ -271,10 +270,19 @@ fn append_decode_buffer(decoder_wrapper: &mut DecoderWrapper, shared_buffer: &mu
                 return;
                 //println!("error: {error}")
             }
-            DecodeResult::EndOfStream => break 'l1,
+            DecodeResult::EndOfStream => {
+                let buf_ref_s = [
+                    exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
+                    exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
+                ];
+                for channel_data_ref in buf_ref_s {
+                    channel_data_ref[head..].fill(0f32);
+                }
+
+                singnal_to_thread();
+                break 'l1;
+            }
             DecodeResult::None => continue,
         }
     }
-
-    println!("end of func");
 }
