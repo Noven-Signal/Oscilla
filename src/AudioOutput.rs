@@ -6,7 +6,7 @@ use std::time::Duration;
 use imp::CreateEventW;
 use std::ops::Range;
 use std::ptr::null;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use windows::Win32::Foundation::{HANDLE, WAIT_EVENT};
 use windows::Win32::System::Threading::{INFINITE, WaitForSingleObject};
@@ -15,6 +15,7 @@ use windows::{
     core::*,
 };
 
+use crate::app::PlayerToUISingnal;
 use crate::manipulation::{
     BLOCK_SIZE, CHANNEL, DecoderRendererSyncSignal, RendererControlSignal, SharedBuffer,
 };
@@ -22,9 +23,14 @@ use crate::manipulation::{
 pub fn main(
     shared_buffer: &mut SharedBuffer,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
+    player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
 ) -> Result<()> {
     unsafe {
-        let mut audio_output = AudioOutput::new(shared_buffer, control_signal_receiver)?;
+        let mut audio_output = AudioOutput::new(
+            shared_buffer,
+            control_signal_receiver,
+            player_to_ui_singnal_sender,
+        )?;
         audio_output.start();
     }
     Ok(())
@@ -37,6 +43,7 @@ struct AudioOutput<'a> {
     shared_buffer: &'a mut SharedBuffer,
     wasapi_event_hanle: HANDLE,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
+    player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
 }
 unsafe impl<'a> Send for AudioOutput<'a> {}
 
@@ -44,6 +51,7 @@ impl<'a> AudioOutput<'a> {
     pub unsafe fn new(
         shared_buffer: &'a mut SharedBuffer,
         control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
+        player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
     ) -> Result<Self> {
         unsafe {
             CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
@@ -63,6 +71,7 @@ impl<'a> AudioOutput<'a> {
             shared_buffer,
             wasapi_event_hanle: handle,
             control_signal_receiver,
+            player_to_ui_singnal_sender,
         })
     }
     #[allow(unsafe_op_in_unsafe_fn)]
@@ -147,8 +156,6 @@ impl<'a> AudioOutput<'a> {
 
         singnal_to_thread();
         'l1: loop {
-            
-            //tokio::time::sleep(Duration::ZERO).await;
             let mut paused = false;
             'control_singal_loop: loop {
                 if self.control_signal_receiver.is_empty() && !paused {
@@ -174,8 +181,6 @@ impl<'a> AudioOutput<'a> {
                     _ => break 'l1,
                 }
             }
-
-            count = count + 1;
 
             match WaitForSingleObject(self.wasapi_event_hanle, INFINITE) {
                 windows::Win32::Foundation::WAIT_OBJECT_0 => {}
@@ -251,7 +256,7 @@ impl<'a> AudioOutput<'a> {
                     }
 
                     singnal_to_thread();
-                    
+
                     read_exclusive = next_block(read_exclusive);
 
                     let spill_over_len = head + available - BLOCK_SIZE;
@@ -279,6 +284,9 @@ impl<'a> AudioOutput<'a> {
             };
 
             self.render_client.ReleaseBuffer(available as u32, 0)?;
+            count = count + 1;
+            self.player_to_ui_singnal_sender
+                .send(PlayerToUISingnal::PlayedFrames(available as u32));
         }
 
         //sleep(Duration::from_millis(500));

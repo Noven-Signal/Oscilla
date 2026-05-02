@@ -6,7 +6,6 @@ use crate::{
     AppState::AppState::{AppStateContainer, PlayState},
     app::App,
     manipulation::PlayerControlSignal,
-    tui::Event,
     widgets::AppRoot::*,
 };
 
@@ -17,7 +16,6 @@ mod MyDefMacro;
 mod action;
 mod app;
 mod cli;
-mod components;
 mod config;
 mod errors;
 mod extensions;
@@ -54,20 +52,11 @@ async fn main() -> color_eyre::Result<()> {
         .filter(|arg| arg != current_exe_path)
         .collect::<Vec<String>>();
 
-    let first_play_file_path = filtered_args[0].clone();
 
-    let mut app_state_container = AppStateContainer::new(filtered_args);
-    app_state_container.play_state = PlayState::Playing(0);
-    let (player_control_signal_sender, mut player_control_signal_recv) =
-        unbounded_channel::<PlayerControlSignal>();
-    app_state_container.player_control_singnal_sender = Some(player_control_signal_sender);
-    let initial_play_thread_handle = tokio::spawn(async move {
-        manipulation::play_executor(&first_play_file_path, &mut player_control_signal_recv).await;
-    });
+    let app_state_container = AppStateContainer::new(filtered_args);
 
     let mut app = App::new(AppRoot::default(), app_state_container)?;
     app.run().await?;
-    initial_play_thread_handle.await?;
 
     Ok(())
 }

@@ -1,12 +1,12 @@
 pub mod AppState {
-    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use crossterm::event::KeyCode;
     use ratatui::widgets::ListState;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
     use crate::manipulation::PlayerControlSignal;
-    use crate::tui::Event;
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
     use crate::widgets::ListArea::ListArea;
@@ -140,6 +140,12 @@ pub mod AppState {
         }
     }
 
+    pub struct PlayingTrackInfo {
+        pub sample_rate: u32,
+        pub track_duraion: Duration,
+        pub current_played_duration: Duration,
+    }
+
     pub enum PlayState {
         Playing(usize),
         Paused(usize),
@@ -147,8 +153,8 @@ pub mod AppState {
     }
 
     impl PlayState {
-        pub fn to_play_button_state(&self)->PlayButtonState{
-            match self{
+        pub fn to_play_button_state(&self) -> PlayButtonState {
+            match self {
                 PlayState::Playing(_) => PlayButtonState::Playing,
                 PlayState::Paused(_) => PlayButtonState::Paused,
                 PlayState::Stop => todo!(),
@@ -161,9 +167,10 @@ pub mod AppState {
         pub focus_state: TabState,
         pub button_focus_state: ButtonIdent,
         pub vol_state: u16,
-        pub play_list: Vec<String>,
+        pub play_list: Arc<Vec<String>>,
         pub play_list_selected: ListState,
         pub play_state: PlayState,
+        pub playing_track_info: Option<PlayingTrackInfo>,
         pub player_control_singnal_sender: Option<UnboundedSender<PlayerControlSignal>>,
     }
 
@@ -174,11 +181,12 @@ pub mod AppState {
             Self {
                 focus_state: TabState::None,
                 button_focus_state: ButtonIdent::PlayOrPause(PlayButtonState::Playing),
-                play_list: list,
+                play_list: Arc::new(list),
                 vol_state: 100,
                 play_list_selected: ListState::default(),
                 play_state: PlayState::Stop,
                 player_control_singnal_sender: None,
+                playing_track_info: None,
             }
         }
     }

@@ -3,7 +3,6 @@ use std::env;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::error;
 
-use crate::tui::Event;
 
 pub fn init() -> color_eyre::Result<()> {
     let (panic_hook, eyre_hook) = color_eyre::config::HookBuilder::default()

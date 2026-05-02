@@ -21,19 +21,8 @@ use crate::{
     AppState::AppState::AppStateContainer,
     AudioOutput,
     DecoderWrapper::{DecodeResult, DecoderWrapper},
+    app::{PlayerToUISingnal, TrackInfo},
 };
-
-// pub fn play(app_state_container: &AppStateContainer) {
-//     let Some(selected) = app_state_container.play_list_selected.selected() else {
-//         return;
-//     };
-//     let playback_file_path_ptr = app_state_container.play_list[selected].as_str();
-//     let playback_file_path = String::from(playback_file_path_ptr);
-
-//     tokio::spawn(async move {
-//         play_executor(&playback_file_path).await;
-//     });
-// }
 
 pub struct DecoderRendererSyncSignal();
 
@@ -66,6 +55,7 @@ pub const CHANNEL: usize = 2;
 pub async fn play_executor(
     playback_file_path: &str,
     player_control_signal_recv: &mut UnboundedReceiver<PlayerControlSignal>,
+    player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
 ) {
     let probe = get_probe();
     use std::fs::File;
@@ -73,7 +63,7 @@ pub async fn play_executor(
         return;
     };
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    
+
     let mut hint = Hint::new();
     hint.with_extension("mp3");
     let probe_result = probe.format(&hint, mss, &Default::default(), &Default::default());
@@ -87,6 +77,17 @@ pub async fn play_executor(
         Ok(d) => d,
         Err(_) => todo!(),
     };
+
+    if let (Some(track_duration), Some(sample_rate)) = (
+        decoder_wrapper.get_duration(),
+        decoder_wrapper.get_sample_rate(),
+    ) {
+        let track_info = TrackInfo {
+            sample_rate,
+            track_duration,
+        };
+        player_to_ui_singnal_sender.send(PlayerToUISingnal::NoticeTrackInfo(track_info));
+    }
 
     let (renderer_to_decoder_sender, renderer_to_docoder_reciever) = mpsc::unbounded_channel();
     let (decoder_to_renderer_sender, decoder_to_renderer_reciever) = mpsc::unbounded_channel();
@@ -126,10 +127,16 @@ pub async fn play_executor(
     let (renderer_control_signal_sender, renderer_control_signal_recv) =
         unbounded_channel::<RendererControlSignal>();
 
+    let player_to_ui_singnal = player_to_ui_singnal_sender.clone();
     let renderer_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = retrieve_ref(shared_buffer_for_renderer);
 
-        AudioOutput::main(shared_buffer, renderer_control_signal_recv).unwrap();
+        AudioOutput::main(
+            shared_buffer,
+            renderer_control_signal_recv,
+            player_to_ui_singnal,
+        )
+        .unwrap();
         //let res = res.ok();
     });
 

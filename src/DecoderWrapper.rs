@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt::{self, Display};
+use std::time::Duration;
 
 use symphonia::core::audio::{AsAudioBufferRef, AudioBufferRef, Signal};
 use symphonia::core::codecs::{Decoder, DecoderOptions};
@@ -79,5 +80,21 @@ impl DecoderWrapper {
             Err(err) => DecodeResult::Err(err),
         }
         //   do_verification(decoder.finalize())
+    }
+
+    pub fn get_duration(&self) -> Option<Duration> {
+        let params = &self.reader.tracks()[self.track_id as usize].codec_params;
+        let (Some(n_frames), Some(sample_rate)) = (params.n_frames, params.sample_rate) else {
+            return None;
+        };
+
+        Some(Duration::from_secs_f64(
+            n_frames as f64 / sample_rate as f64,
+        ))
+    }
+
+    pub fn get_sample_rate(&self) -> Option<u32> {
+        let params = &self.reader.tracks()[self.track_id as usize].codec_params;
+        params.sample_rate
     }
 }
