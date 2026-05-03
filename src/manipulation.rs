@@ -1,6 +1,7 @@
 use std::{
     fmt::Debug,
     panic,
+    path::Path,
     sync::{
         Arc,
         atomic::{AtomicPtr, Ordering},
@@ -50,8 +51,12 @@ pub struct SharedBuffer {
     pub channel_right_data: ChannelData,
 }
 
-pub const BLOCK_SIZE: usize = 8 * 1024;
+pub const BLOCK_SIZE: usize = 512 * 1024;
 pub const CHANNEL: usize = 2;
+
+fn array_init<T: Sized + Debug, const N: usize>(f: impl Fn() -> T) -> [T; N] {
+    (0..N).map(|_| f()).collect::<Vec<T>>().try_into().unwrap()
+}
 
 pub async fn play_executor(
     playback_file_path: &str,
@@ -66,7 +71,14 @@ pub async fn play_executor(
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
     let mut hint = Hint::new();
-    hint.with_extension("mp3");
+    let extension = match Path::extension(Path::new(playback_file_path)) {
+        Some(os_str) => match os_str.to_str() {
+            Some(str) => str,
+            None => "",
+        },
+        None => "",
+    };
+    hint.with_extension(extension);
     let probe_result = probe.format(&hint, mss, &Default::default(), &Default::default());
     let format_reader = match probe_result {
         Ok(res) => res.format,
@@ -92,10 +104,6 @@ pub async fn play_executor(
 
     let (renderer_to_decoder_sender, renderer_to_docoder_reciever) = mpsc::unbounded_channel();
     let (decoder_to_renderer_sender, decoder_to_renderer_reciever) = mpsc::unbounded_channel();
-
-    fn array_init<T: Sized + Debug, const N: usize>(f: impl Fn() -> T) -> [T; N] {
-        (0..N).map(|_| f()).collect::<Vec<T>>().try_into().unwrap()
-    }
 
     let create_vec = || vec![0f32; BLOCK_SIZE];
     let mut shared_buffer = SharedBuffer {
@@ -187,6 +195,8 @@ fn append_decode_buffer(
     let mut write_exclusive: usize = 0;
     let mut count = 0;
     let mut head: usize = 0;
+    let mut type_conversion_buff: [Vec<f32>; CHANNEL] =
+        array_init(|| Vec::with_capacity(BLOCK_SIZE));
     'l1: loop {
         if !decoder_control_signal.is_empty() {
             match decoder_control_signal.blocking_recv() {
@@ -208,96 +218,117 @@ fn append_decode_buffer(
             };
         }
 
+        enum DecodeLoopResult {
+            Ok,
+            Error,
+        }
+
+        let mut proc_f32 = |view: &[&[f32]]| -> DecodeLoopResult {
+            let view_0 = view[0];
+            let view_1 = view[1];
+            let mut fill_buff_within_block = || {
+                let copy_buff = |exclusive_buf: &mut [f32], view: &[f32]| {
+                    let target_slice = &mut exclusive_buf[head..head + view.len()];
+                    target_slice.copy_from_slice(view);
+                };
+
+                let exclusive_buf_left = exclusize_buf_ref_mut!(channel_left_data, write_exclusive);
+                let exclusive_buf_right =
+                    exclusize_buf_ref_mut!(channel_right_data, write_exclusive);
+
+                copy_buff(exclusive_buf_left, view_0);
+                copy_buff(exclusive_buf_right, view_1);
+            };
+
+            let target_len = head + view_0.len();
+
+            use std::cmp::Ordering::*;
+            match Ord::cmp(&target_len, &BLOCK_SIZE) {
+                Less => {
+                    fill_buff_within_block();
+                    head = head + view_0.len();
+                }
+                Equal => {
+                    fill_buff_within_block();
+                    if let Err(_) = singnal_to_thread() {
+                        return DecodeLoopResult::Error;
+                    }
+
+                    write_exclusive = next_block(write_exclusive);
+                    head = 0;
+                }
+                Greater => {
+                    fn fill_current_block_buff<'a>(
+                        head: usize,
+                        exclusive_buf: &mut [f32],
+                        view: &'a [f32],
+                    ) -> &'a [f32] {
+                        let target_slice_spill_over = &mut exclusive_buf[head..];
+
+                        let (current_view, spill_over_view) = view.split_at(BLOCK_SIZE - head);
+                        target_slice_spill_over.copy_from_slice(current_view);
+
+                        spill_over_view
+                    }
+
+                    let spill_over_ch_0 = fill_current_block_buff(
+                        head,
+                        exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
+                        view_0,
+                    );
+                    let spill_over_ch_1 = fill_current_block_buff(
+                        head,
+                        exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
+                        view_1,
+                    );
+                    if let Err(_) = singnal_to_thread() {
+                        return DecodeLoopResult::Error;
+                    }
+
+                    write_exclusive = next_block(write_exclusive);
+
+                    let fill_spill_over_block_buff =
+                        |exclusive_buf_spill_over: &mut [f32], spill_over_view: &[f32]| {
+                            let target_slice_spill_over =
+                                &mut exclusive_buf_spill_over[0..spill_over_view.len()];
+
+                            target_slice_spill_over.copy_from_slice(spill_over_view);
+                        };
+
+                    fill_spill_over_block_buff(
+                        exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
+                        spill_over_ch_0,
+                    );
+                    fill_spill_over_block_buff(
+                        exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
+                        spill_over_ch_1,
+                    );
+
+                    head = spill_over_ch_0.len();
+                }
+            }
+            DecodeLoopResult::Ok
+        };
+
         use symphonia::core::audio::AudioBufferRef::*;
         match decoded {
             DecodeResult::Buf(audio_buffer_ref) => match audio_buffer_ref {
                 F32(cow) => {
-                    let view_0 = cow.chan(0);
-                    let view_1 = cow.chan(1);
-
-                    let mut fill_buff_within_block = || {
-                        let copy_buff = |exclusive_buf: &mut [f32], view: &[f32]| {
-                            let target_slice = &mut exclusive_buf[head..head + view.len()];
-                            target_slice.copy_from_slice(view);
-                        };
-
-                        let exclusive_buf_left =
-                            exclusize_buf_ref_mut!(channel_left_data, write_exclusive);
-                        let exclusive_buf_right =
-                            exclusize_buf_ref_mut!(channel_right_data, write_exclusive);
-
-                        copy_buff(exclusive_buf_left, view_0);
-                        copy_buff(exclusive_buf_right, view_1);
-                    };
-
-                    let target_len = head + view_0.len();
-
-                    use std::cmp::Ordering::*;
-                    match Ord::cmp(&target_len, &BLOCK_SIZE) {
-                        Less => {
-                            fill_buff_within_block();
-                            head = head + view_0.len();
-                        }
-                        Equal => {
-                            fill_buff_within_block();
-                            if let Err(_) = singnal_to_thread() {
-                                break 'l1;
-                            }
-
-                            write_exclusive = next_block(write_exclusive);
-                            head = 0;
-                        }
-                        Greater => {
-                            fn fill_current_block_buff<'a>(
-                                head: usize,
-                                exclusive_buf: &mut [f32],
-                                view: &'a [f32],
-                            ) -> &'a [f32] {
-                                let target_slice_spill_over = &mut exclusive_buf[head..];
-
-                                let (current_view, spill_over_view) =
-                                    view.split_at(BLOCK_SIZE - head);
-                                target_slice_spill_over.copy_from_slice(current_view);
-
-                                spill_over_view
-                            }
-
-                            let spill_over_ch_0 = fill_current_block_buff(
-                                head,
-                                exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
-                                view_0,
-                            );
-                            let spill_over_ch_1 = fill_current_block_buff(
-                                head,
-                                exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
-                                view_1,
-                            );
-                            if let Err(_) = singnal_to_thread() {
-                                break 'l1;
-                            }
-
-                            write_exclusive = next_block(write_exclusive);
-
-                            let fill_spill_over_block_buff =
-                                |exclusive_buf_spill_over: &mut [f32], spill_over_view: &[f32]| {
-                                    let target_slice_spill_over =
-                                        &mut exclusive_buf_spill_over[0..spill_over_view.len()];
-
-                                    target_slice_spill_over.copy_from_slice(spill_over_view);
-                                };
-
-                            fill_spill_over_block_buff(
-                                exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
-                                spill_over_ch_0,
-                            );
-                            fill_spill_over_block_buff(
-                                exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
-                                spill_over_ch_1,
-                            );
-
-                            head = spill_over_ch_0.len();
-                        }
+                    let view = [0, 1].map(|ch| cow.chan(ch));
+                    if let DecodeLoopResult::Error = proc_f32(&view) {
+                        break 'l1;
                     }
+                }
+                S16(cow) => {
+                    for ch in 0..CHANNEL {
+                        type_conversion_buff[ch] = cow
+                            .chan(ch)
+                            .iter()
+                            .map(|x| (*x as f32) / (i16::MAX as f32))
+                            .collect();
+                    }
+                    let target = [0, 1].map(|x| type_conversion_buff[x].as_slice());
+                    proc_f32(&target);
                 }
                 _ => {}
             },

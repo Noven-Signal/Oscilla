@@ -33,7 +33,7 @@ async fn main() -> color_eyre::Result<()> {
         Some(os_str) => {
             if let Some(ext_str) = os_str.to_str() {
                 match ext_str {
-                    "wav" | "mp3" => true,
+                    "wav" | "mp3" | "ogg" | "m4a" => true,
                     _ => false,
                 }
             } else {

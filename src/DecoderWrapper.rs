@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use std::time::Duration;
 
 use symphonia::core::audio::{AsAudioBufferRef, AudioBufferRef, Signal};
-use symphonia::core::codecs::{Decoder, DecoderOptions};
+use symphonia::core::codecs::{CodecParameters, Decoder, DecoderOptions};
 
 use symphonia::core::formats::{FormatReader, Packet};
 use tracing::info;
@@ -82,8 +82,21 @@ impl DecoderWrapper {
         //   do_verification(decoder.finalize())
     }
 
+    fn get_codec_params(&self) -> Option<&CodecParameters> {
+        Some(
+            &self
+                .reader
+                .tracks()
+                .iter()
+                .filter(|track| track.id == self.track_id)
+                .next()?
+                .codec_params,
+        )
+    }
+
     pub fn get_duration(&self) -> Option<Duration> {
-        let params = &self.reader.tracks()[self.track_id as usize].codec_params;
+        let params = self.get_codec_params()?;
+
         let (Some(n_frames), Some(sample_rate)) = (params.n_frames, params.sample_rate) else {
             return None;
         };
@@ -94,7 +107,7 @@ impl DecoderWrapper {
     }
 
     pub fn get_sample_rate(&self) -> Option<u32> {
-        let params = &self.reader.tracks()[self.track_id as usize].codec_params;
+        let params = self.get_codec_params()?;
         params.sample_rate
     }
 }
