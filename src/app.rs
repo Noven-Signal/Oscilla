@@ -86,24 +86,10 @@ impl App {
         self.tui.enter()?;
 
         self.event_loop().await;
-        self.tui.clear();
-        println!("sdfsdf");
         init_auto_play_handle.await;
 
         self.tui.exit();
-        // loop {
-        //     // self.handle_events(&mut tui).await?;
-        //     self.handle_actions().await?;
-        //     if self.should_suspend {
-        //         self.tui.suspend()?;
-        //         // tui.mouse(true);
-        //         self.tui.enter()?;
-        //     } else if self.should_quit {
-        //         self.tui.stop()?;
-        //         break;
-        //     }
-        // }
-        // self.tui.exit()?;
+
         Ok(())
     }
 
