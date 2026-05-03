@@ -196,7 +196,7 @@ fn append_decode_buffer(
     let mut count = 0;
     let mut head: usize = 0;
     let mut type_conversion_buff: [Vec<f32>; CHANNEL] =
-        array_init(|| Vec::with_capacity(BLOCK_SIZE));
+        array_init(|| vec![0f32;BLOCK_SIZE]);
     'l1: loop {
         if !decoder_control_signal.is_empty() {
             match decoder_control_signal.blocking_recv() {
@@ -320,15 +320,17 @@ fn append_decode_buffer(
                     }
                 }
                 S16(cow) => {
+                    let f = |x| (x as f32) / (i16::MAX as f32);
                     for ch in 0..CHANNEL {
-                        type_conversion_buff[ch] = cow
-                            .chan(ch)
-                            .iter()
-                            .map(|x| (*x as f32) / (i16::MAX as f32))
-                            .collect();
+                        for i in 0..cow.chan(ch).len() {
+                            type_conversion_buff[ch][i] = f(cow.chan(ch)[i])
+                        }
                     }
-                    let target = [0, 1].map(|x| type_conversion_buff[x].as_slice());
+                    let type_conversion_buff_view =
+                        |i: usize| &type_conversion_buff[i][0..cow.chan(i).len()];
+                    let target = [0, 1].map(|i| type_conversion_buff_view(i));
                     proc_f32(&target);
+                   
                 }
                 _ => {}
             },
