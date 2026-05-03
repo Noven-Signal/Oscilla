@@ -22,12 +22,16 @@ use crate::manipulation::{
 
 pub fn main(
     shared_buffer: &mut SharedBuffer,
+    renderer_to_decoder_singal_sender: UnboundedSender<DecoderRendererSyncSignal>,
+    decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderRendererSyncSignal>,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
 ) -> Result<()> {
     unsafe {
         let mut audio_output = AudioOutput::new(
             shared_buffer,
+            renderer_to_decoder_singal_sender,
+            decoder_to_renderer_singal_recv,
             control_signal_receiver,
             player_to_ui_singnal_sender,
         )?;
@@ -42,14 +46,17 @@ struct AudioOutput<'a> {
     buffer_frame_count: u32,
     shared_buffer: &'a mut SharedBuffer,
     wasapi_event_hanle: HANDLE,
+    renderer_to_decoder_singal_sender: UnboundedSender<DecoderRendererSyncSignal>,
+    decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderRendererSyncSignal>,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
 }
-unsafe impl<'a> Send for AudioOutput<'a> {}
 
 impl<'a> AudioOutput<'a> {
     pub unsafe fn new(
         shared_buffer: &'a mut SharedBuffer,
+        renderer_to_decoder_singal_sender: UnboundedSender<DecoderRendererSyncSignal>,
+        decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderRendererSyncSignal>,
         control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
         player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
     ) -> Result<Self> {
@@ -69,6 +76,8 @@ impl<'a> AudioOutput<'a> {
             buffer_frame_count,
             render_client,
             shared_buffer,
+            renderer_to_decoder_singal_sender,
+            decoder_to_renderer_singal_recv,
             wasapi_event_hanle: handle,
             control_signal_receiver,
             player_to_ui_singnal_sender,
@@ -143,10 +152,9 @@ impl<'a> AudioOutput<'a> {
         };
 
         let mut singnal_to_thread = || {
-            let reciever = &mut self.shared_buffer.decoder_to_renderer_reciever;
-            reciever.blocking_recv();
-            let sender = &mut self.shared_buffer.renderer_to_decoder_sender;
-            sender.send(DecoderRendererSyncSignal()).unwrap();
+            self.decoder_to_renderer_singal_recv.blocking_recv();
+            self.renderer_to_decoder_singal_sender
+                .send(DecoderRendererSyncSignal())
         };
 
         let mut head: usize = 0;
@@ -154,7 +162,7 @@ impl<'a> AudioOutput<'a> {
         let mut count = 0;
         let mut vol = 1f32;
 
-        singnal_to_thread();
+        _ = singnal_to_thread();
         'l1: loop {
             let mut paused = false;
             'control_singal_loop: loop {
@@ -177,6 +185,11 @@ impl<'a> AudioOutput<'a> {
                         self.audio_client.Start()?;
                         paused = false;
                         continue 'control_singal_loop;
+                    }
+                    Some(RendererControlSignal::Stop) => {
+                        _ = self.audio_client.Stop();
+                        _ = singnal_to_thread();
+                        break 'l1;
                     }
                     _ => break 'l1,
                 }
@@ -238,7 +251,9 @@ impl<'a> AudioOutput<'a> {
                 }
                 Equal => {
                     fill_buff_within_block();
-                    singnal_to_thread();
+                    if let Err(_) = singnal_to_thread() {
+                        break 'l1;
+                    }
 
                     read_exclusive = next_block(read_exclusive);
                     head = 0;
@@ -255,7 +270,9 @@ impl<'a> AudioOutput<'a> {
                         }
                     }
 
-                    singnal_to_thread();
+                    if let Err(_) = singnal_to_thread() {
+                        break 'l1;
+                    }
 
                     read_exclusive = next_block(read_exclusive);
 

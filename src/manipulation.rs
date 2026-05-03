@@ -31,22 +31,23 @@ pub enum RendererControlSignal {
     SetVol(u16),
     Pause,
     Resume,
+    Stop,
 }
 #[derive(Debug)]
 pub enum PlayerControlSignal {
     SetVol(u16),
     Pause,
     Resume,
+    Stop,
+}
+pub enum DecoderControlSignal {
+    Stop,
 }
 pub type ChannelData = [Vec<f32>; 8];
 
 pub struct SharedBuffer {
     pub channel_left_data: ChannelData,
     pub channel_right_data: ChannelData,
-    pub renderer_to_decoder_sender: UnboundedSender<DecoderRendererSyncSignal>,
-    pub renderer_to_docoder_reciever: UnboundedReceiver<DecoderRendererSyncSignal>,
-    pub decoder_to_renderer_sender: UnboundedSender<DecoderRendererSyncSignal>,
-    pub decoder_to_renderer_reciever: UnboundedReceiver<DecoderRendererSyncSignal>,
 }
 
 pub const BLOCK_SIZE: usize = 8 * 1024;
@@ -100,16 +101,10 @@ pub async fn play_executor(
     let mut shared_buffer = SharedBuffer {
         channel_left_data: array_init(create_vec),
         channel_right_data: array_init(create_vec),
-        renderer_to_decoder_sender,
-        renderer_to_docoder_reciever,
-        decoder_to_renderer_sender,
-        decoder_to_renderer_reciever,
     };
 
     for _ in 0..6 {
-        shared_buffer
-            .renderer_to_decoder_sender
-            .send(DecoderRendererSyncSignal());
+        renderer_to_decoder_sender.send(DecoderRendererSyncSignal());
     }
 
     let shared_buffer_for_decoder = AtomicPtr::new(&raw mut shared_buffer);
@@ -119,13 +114,20 @@ pub async fn play_executor(
         atomic_ptr.load(Ordering::Acquire).as_mut().unwrap()
     };
 
+    let (decoder_control_signal_sender, decoder_control_signal_recv) = unbounded_channel();
+
     let decoder_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = retrieve_ref(shared_buffer_for_decoder);
-        append_decode_buffer(&mut decoder_wrapper, shared_buffer);
+        append_decode_buffer(
+            &mut decoder_wrapper,
+            shared_buffer,
+            decoder_to_renderer_sender,
+            renderer_to_docoder_reciever,
+            decoder_control_signal_recv,
+        );
     });
 
-    let (renderer_control_signal_sender, renderer_control_signal_recv) =
-        unbounded_channel::<RendererControlSignal>();
+    let (renderer_control_signal_sender, renderer_control_signal_recv) = unbounded_channel();
 
     let player_to_ui_singnal = player_to_ui_singnal_sender.clone();
     let renderer_handle = tokio::task::spawn_blocking(move || {
@@ -133,6 +135,8 @@ pub async fn play_executor(
 
         AudioOutput::main(
             shared_buffer,
+            renderer_to_decoder_sender,
+            decoder_to_renderer_reciever,
             renderer_control_signal_recv,
             player_to_ui_singnal,
         )
@@ -141,39 +145,59 @@ pub async fn play_executor(
     });
 
     'l1: loop {
-        let map_signal = match player_control_signal_recv.recv().await {
-            Some(PlayerControlSignal::SetVol(vol)) => RendererControlSignal::SetVol(vol),
-            Some(PlayerControlSignal::Pause) => RendererControlSignal::Pause,
-            Some(PlayerControlSignal::Resume) => RendererControlSignal::Resume,
-
+        match player_control_signal_recv.recv().await {
+            Some(PlayerControlSignal::SetVol(vol)) => {
+                renderer_control_signal_sender.send(RendererControlSignal::SetVol(vol));
+            }
+            Some(PlayerControlSignal::Pause) => {
+                renderer_control_signal_sender.send(RendererControlSignal::Pause);
+            }
+            Some(PlayerControlSignal::Resume) => {
+                renderer_control_signal_sender.send(RendererControlSignal::Resume);
+            }
+            Some(PlayerControlSignal::Stop) => {
+                renderer_control_signal_sender.send(RendererControlSignal::Stop);
+                decoder_control_signal_sender.send(DecoderControlSignal::Stop);
+                break 'l1;
+            }
             None => break 'l1,
         };
-        renderer_control_signal_sender.send(map_signal);
     }
 
-    join!(decoder_handle, renderer_handle);
-
-    //tokio::time::sleep(Duration::from_secs(u64::MAX)).await;
+    join!(renderer_handle, decoder_handle);
 }
 
-fn append_decode_buffer(decoder_wrapper: &mut DecoderWrapper, shared_buffer: &mut SharedBuffer) {
+fn append_decode_buffer(
+    decoder_wrapper: &mut DecoderWrapper,
+    shared_buffer: &mut SharedBuffer,
+    decoder_to_renderer_sender: UnboundedSender<DecoderRendererSyncSignal>,
+    mut renderer_to_decoder_singal_recv: UnboundedReceiver<DecoderRendererSyncSignal>,
+    mut decoder_control_signal: UnboundedReceiver<DecoderControlSignal>,
+) {
     let next_block = |write_end| match write_end {
         7 => 0,
         write_end => write_end + 1,
     };
 
     let mut singnal_to_thread = || {
-        let reciever = &mut shared_buffer.renderer_to_docoder_reciever;
-        reciever.blocking_recv();
-
-        let sender = &mut shared_buffer.decoder_to_renderer_sender;
-        sender.send(DecoderRendererSyncSignal()).unwrap();
+        renderer_to_decoder_singal_recv.blocking_recv();
+        decoder_to_renderer_sender.send(DecoderRendererSyncSignal())
     };
 
     let mut write_exclusive: usize = 0;
     let mut count = 0;
     let mut head: usize = 0;
     'l1: loop {
+        if !decoder_control_signal.is_empty() {
+            match decoder_control_signal.blocking_recv() {
+                Some(DecoderControlSignal::Stop) => {
+                    _ = singnal_to_thread();
+                    break 'l1;
+                }
+                None => break 'l1,
+            }
+        }
+
         count = count + 1;
         //tokio::time::sleep(Duration::ZERO).await;
         let decoded = decoder_wrapper.decode();
@@ -216,7 +240,9 @@ fn append_decode_buffer(decoder_wrapper: &mut DecoderWrapper, shared_buffer: &mu
                         }
                         Equal => {
                             fill_buff_within_block();
-                            singnal_to_thread();
+                            if let Err(_) = singnal_to_thread() {
+                                break 'l1;
+                            }
 
                             write_exclusive = next_block(write_exclusive);
                             head = 0;
@@ -246,7 +272,9 @@ fn append_decode_buffer(decoder_wrapper: &mut DecoderWrapper, shared_buffer: &mu
                                 exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
                                 view_1,
                             );
-                            singnal_to_thread();
+                            if let Err(_) = singnal_to_thread() {
+                                break 'l1;
+                            }
 
                             write_exclusive = next_block(write_exclusive);
 

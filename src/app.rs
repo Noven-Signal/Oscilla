@@ -15,7 +15,10 @@ use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use futures::{FutureExt, StreamExt};
 use ratatui::{prelude::Rect, widgets::StatefulWidget};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::{
+    sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    task::JoinHandle,
+};
 use tokio_util::sync::CancellationToken;
 
 pub struct App {
@@ -24,7 +27,7 @@ pub struct App {
     app_state_container: AppStateContainer,
     player_to_ui_singnal_signal: UnboundedSender<PlayerToUISingnal>,
     player_to_ui_singnal_receiver: UnboundedReceiver<PlayerToUISingnal>,
-    event_loop_cancellation_token: CancellationToken,
+    event_loop_canceled: bool,
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -54,11 +57,11 @@ impl App {
             app_state_container: app_state_container,
             player_to_ui_singnal_signal: sender,
             player_to_ui_singnal_receiver: receiver,
-            event_loop_cancellation_token: CancellationToken::new(),
+            event_loop_canceled: false,
         })
     }
 
-    async fn init_auto_play(&mut self) {
+    async fn init_auto_play(&mut self) -> JoinHandle<()> {
         let play_list_arc = self.app_state_container.play_list.clone();
         self.app_state_container.play_state = PlayState::Playing(0);
         let (player_control_signal_sender, mut player_control_signal_recv) =
@@ -75,14 +78,19 @@ impl App {
                 player_to_ui_singnal_sender,
             )
             .await;
-        });
+        })
     }
 
     pub async fn run(&mut self) -> color_eyre::Result<()> {
-        self.init_auto_play().await;
+        let init_auto_play_handle = self.init_auto_play().await;
         self.tui.enter()?;
 
         self.event_loop().await;
+        self.tui.clear();
+        println!("sdfsdf");
+        init_auto_play_handle.await;
+
+        self.tui.exit();
         // loop {
         //     // self.handle_events(&mut tui).await?;
         //     self.handle_actions().await?;
@@ -103,10 +111,10 @@ impl App {
         let mut event_stream = EventStream::new();
 
         'l1: loop {
+            if self.event_loop_canceled {
+                break 'l1;
+            }
             tokio::select! {
-                _ = self.event_loop_cancellation_token.cancelled() => {
-                    break 'l1;
-                }
                 signal = self.player_to_ui_singnal_receiver.recv() => {
                     match signal{
                         Some(signal) => self.handle_player_to_ui_singnal(signal)?,
@@ -118,6 +126,10 @@ impl App {
                     _ => break 'l1,
                 },
             };
+        }
+       
+        if let Some(ref mut sender) = self.app_state_container.player_control_singnal_sender {
+            sender.send(PlayerControlSignal::Stop);
         }
 
         Ok(())
@@ -141,9 +153,10 @@ impl App {
                 let add_duration =
                     Duration::from_secs_f64(frames as f64 / track_info.sample_rate as f64);
                 let before_duration = track_info.current_played_duration;
-                let after_duration = track_info.current_played_duration + add_duration;
-                track_info.current_played_duration =
-                    track_info.current_played_duration + add_duration;
+                let after_duration = track_info
+                    .current_played_duration
+                    .saturating_add(add_duration);
+                track_info.current_played_duration = after_duration;
                 if before_duration.as_secs() != after_duration.as_secs() {
                     self.render()?;
                 }
@@ -178,7 +191,7 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => {
-                self.event_loop_cancellation_token.cancel();
+                self.event_loop_canceled = true;
             }
             KeyEvent {
                 code,
