@@ -21,7 +21,7 @@ use crate::manipulation::{
 };
 
 pub fn main(
-    shared_buffer: &mut SharedBuffer,
+    shared_buffer: &SharedBuffer,
     renderer_to_decoder_singal_sender: UnboundedSender<DecoderRendererSyncSignal>,
     decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderRendererSyncSignal>,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
@@ -44,7 +44,7 @@ struct AudioOutput<'a> {
     audio_client: IAudioClient,
     render_client: IAudioRenderClient,
     buffer_frame_count: u32,
-    shared_buffer: &'a mut SharedBuffer,
+    shared_buffer: &'a SharedBuffer,
     wasapi_event_hanle: HANDLE,
     renderer_to_decoder_singal_sender: UnboundedSender<DecoderRendererSyncSignal>,
     decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderRendererSyncSignal>,
@@ -54,7 +54,7 @@ struct AudioOutput<'a> {
 
 impl<'a> AudioOutput<'a> {
     pub unsafe fn new(
-        shared_buffer: &'a mut SharedBuffer,
+        shared_buffer: &'a SharedBuffer,
         renderer_to_decoder_singal_sender: UnboundedSender<DecoderRendererSyncSignal>,
         decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderRendererSyncSignal>,
         control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
@@ -222,17 +222,19 @@ impl<'a> AudioOutput<'a> {
                 unsafe { std::slice::from_raw_parts_mut(ptr as *mut f32, available * CHANNEL) }
             };
 
-            macro_rules! dec_get_block_clo {
-                ($ident: ident,$tt:tt) => {
-                    let $ident = |read_exclusive: usize| &self.shared_buffer.$tt[read_exclusive];
-                };
-            }
-            dec_get_block_clo!(get_block_left, channel_left_data);
-            dec_get_block_clo!(get_block_right, channel_right_data);
+            // macro_rules! dec_get_block_clo {
+            //     ($ident: ident,$tt:tt) => {
+            //         let $ident = |read_exclusive: usize| &self.shared_buffer.$tt[read_exclusive];
+            //     };
+            // }
+            // dec_get_block_clo!(get_block_left, channel_left_data);
+            // dec_get_block_clo!(get_block_right, channel_right_data);
 
             let mut fill_buff_within_block = || {
-                let src_slice_ch_0 = &get_block_left(read_exclusive)[head..head + available];
-                let src_slice_ch_1 = &get_block_right(read_exclusive)[head..head + available];
+                let get_src_slice =
+                    |ch: usize| &self.shared_buffer[read_exclusive][ch][head..head + available];
+                let src_slice_ch_0 = get_src_slice(0);
+                let src_slice_ch_1 = get_src_slice(1);
 
                 for i in 0..src_slice_ch_0.len() {
                     output_buffer[i * CHANNEL] = src_slice_ch_0[i] * vol;
@@ -261,8 +263,10 @@ impl<'a> AudioOutput<'a> {
                 }
                 Greater => {
                     {
-                        let src_slice_current_ch_0 = &get_block_left(read_exclusive)[head..];
-                        let src_slice_current_ch_1 = &get_block_right(read_exclusive)[head..];
+                        let get_src_slice =
+                            |ch: usize| &self.shared_buffer[read_exclusive][ch][head..];
+                        let src_slice_current_ch_0 = &get_src_slice(0);
+                        let src_slice_current_ch_1 = &get_src_slice(1);
 
                         for i in 0..src_slice_current_ch_0.len() {
                             output_buffer[i * CHANNEL] = src_slice_current_ch_0[i] * vol;
@@ -280,10 +284,11 @@ impl<'a> AudioOutput<'a> {
                     {
                         assert!(spill_over_len < BLOCK_SIZE);
 
-                        let src_slice_spill_over_ch_0 =
-                            &get_block_left(read_exclusive)[0..spill_over_len];
-                        let src_slice_spill_over_ch_1 =
-                            &get_block_right(read_exclusive)[0..spill_over_len];
+                        let get_src_slice =
+                            |ch: usize| &self.shared_buffer[read_exclusive][ch][0..spill_over_len];
+
+                        let src_slice_spill_over_ch_0 = get_src_slice(0);
+                        let src_slice_spill_over_ch_1 = get_src_slice(1);
 
                         let split_len_channel_combined = {
                             let split_len_ch = BLOCK_SIZE - head;

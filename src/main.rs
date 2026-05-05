@@ -23,6 +23,7 @@ mod logging;
 mod manipulation;
 mod tui;
 mod widgets;
+mod visual_effects;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {

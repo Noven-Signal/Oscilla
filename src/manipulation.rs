@@ -26,6 +26,7 @@ use crate::{
 };
 
 pub struct DecoderRendererSyncSignal();
+pub struct DecoderVisualEffectThreadSyncSignal();
 
 #[derive(Debug)]
 pub enum RendererControlSignal {
@@ -44,15 +45,17 @@ pub enum PlayerControlSignal {
 pub enum DecoderControlSignal {
     Stop,
 }
-pub type ChannelData = [Vec<f32>; 8];
 
-pub struct SharedBuffer {
-    pub channel_left_data: ChannelData,
-    pub channel_right_data: ChannelData,
-}
+pub type SharedBuffer = [[Vec<f32>; CHANNEL]; NUM_OF_BLOCK];
 
-pub const BLOCK_SIZE: usize = 512 * 1024;
+#[derive(Debug)]
+pub struct OscilloscopeData(pub Vec<f32>);
+pub type VESharedBuffer = [[OscilloscopeData; CHANNEL]; NUM_OF_BLOCK_VE];
+
+pub const BLOCK_SIZE: usize = 16 * 1024;
 pub const CHANNEL: usize = 2;
+pub const NUM_OF_BLOCK: usize = 8;
+pub const NUM_OF_BLOCK_VE: usize = 8;
 
 fn array_init<T: Sized + Debug, const N: usize>(f: impl Fn() -> T) -> [T; N] {
     (0..N).map(|_| f()).collect::<Vec<T>>().try_into().unwrap()
@@ -105,25 +108,23 @@ pub async fn play_executor(
     let (renderer_to_decoder_sender, renderer_to_docoder_reciever) = mpsc::unbounded_channel();
     let (decoder_to_renderer_sender, decoder_to_renderer_reciever) = mpsc::unbounded_channel();
 
-    let create_vec = || vec![0f32; BLOCK_SIZE];
-    let mut shared_buffer = SharedBuffer {
-        channel_left_data: array_init(create_vec),
-        channel_right_data: array_init(create_vec),
-    };
+    let mut shared_buffer = array_init(|| array_init(|| vec![0f32; BLOCK_SIZE]));
 
-    for _ in 0..6 {
+    for _ in 0..NUM_OF_BLOCK - 2 {
         renderer_to_decoder_sender.send(DecoderRendererSyncSignal());
     }
 
     let shared_buffer_for_decoder = AtomicPtr::new(&raw mut shared_buffer);
     let shared_buffer_for_renderer = AtomicPtr::new(&raw mut shared_buffer);
+    let shared_buffer_for_ve = AtomicPtr::new(&raw mut shared_buffer);
 
     let retrieve_ref = |atomic_ptr: AtomicPtr<SharedBuffer>| unsafe {
         atomic_ptr.load(Ordering::Acquire).as_mut().unwrap()
     };
 
     let (decoder_control_signal_sender, decoder_control_signal_recv) = unbounded_channel();
-
+    let (decoder_to_visual_effect_signal_sender, visual_effect_to_decoder_signal_recv) =
+        unbounded_channel();
     let decoder_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = retrieve_ref(shared_buffer_for_decoder);
         append_decode_buffer(
@@ -131,8 +132,17 @@ pub async fn play_executor(
             shared_buffer,
             decoder_to_renderer_sender,
             renderer_to_docoder_reciever,
+            decoder_to_visual_effect_signal_sender,
+            visual_effect_to_decoder_signal_recv,
             decoder_control_signal_recv,
         );
+    });
+
+    let ve_shared_buffer: VESharedBuffer =
+        array_init(|| array_init(|| OscilloscopeData(vec![0f32; BLOCK_SIZE])));
+    let visual_effect_handle = tokio::task::spawn_blocking(move || {
+        let shared_buffer = retrieve_ref(shared_buffer_for_ve);
+        loop {}
     });
 
     let (renderer_control_signal_sender, renderer_control_signal_recv) = unbounded_channel();
@@ -180,6 +190,10 @@ fn append_decode_buffer(
     shared_buffer: &mut SharedBuffer,
     decoder_to_renderer_sender: UnboundedSender<DecoderRendererSyncSignal>,
     mut renderer_to_decoder_singal_recv: UnboundedReceiver<DecoderRendererSyncSignal>,
+    decoder_to_visual_effect_signal_sender: UnboundedSender<DecoderVisualEffectThreadSyncSignal>,
+    mut visual_effect_to_decoder_signal_recv: UnboundedReceiver<
+        DecoderVisualEffectThreadSyncSignal,
+    >,
     mut decoder_control_signal: UnboundedReceiver<DecoderControlSignal>,
 ) {
     let next_block = |write_end| match write_end {
@@ -189,14 +203,15 @@ fn append_decode_buffer(
 
     let mut singnal_to_thread = || {
         renderer_to_decoder_singal_recv.blocking_recv();
+      //  visual_effect_to_decoder_signal_recv.blocking_recv();
+        decoder_to_visual_effect_signal_sender.send(DecoderVisualEffectThreadSyncSignal());
         decoder_to_renderer_sender.send(DecoderRendererSyncSignal())
     };
 
     let mut write_exclusive: usize = 0;
     let mut count = 0;
     let mut head: usize = 0;
-    let mut type_conversion_buff: [Vec<f32>; CHANNEL] =
-        array_init(|| vec![0f32;BLOCK_SIZE]);
+    let mut type_conversion_buff: [Vec<f32>; CHANNEL] = array_init(|| vec![0f32; BLOCK_SIZE]);
     'l1: loop {
         if !decoder_control_signal.is_empty() {
             match decoder_control_signal.blocking_recv() {
@@ -232,12 +247,11 @@ fn append_decode_buffer(
                     target_slice.copy_from_slice(view);
                 };
 
-                let exclusive_buf_left = exclusize_buf_ref_mut!(channel_left_data, write_exclusive);
-                let exclusive_buf_right =
-                    exclusize_buf_ref_mut!(channel_right_data, write_exclusive);
+                let exclusive_buff = &mut shared_buffer[write_exclusive];
 
-                copy_buff(exclusive_buf_left, view_0);
-                copy_buff(exclusive_buf_right, view_1);
+                for ch in 0..CHANNEL {
+                    copy_buff(exclusive_buff[ch].as_mut_slice(), view[ch]);
+                }
             };
 
             let target_len = head + view_0.len();
@@ -271,16 +285,24 @@ fn append_decode_buffer(
                         spill_over_view
                     }
 
-                    let spill_over_ch_0 = fill_current_block_buff(
-                        head,
-                        exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
-                        view_0,
-                    );
-                    let spill_over_ch_1 = fill_current_block_buff(
-                        head,
-                        exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
-                        view_1,
-                    );
+                    let spill_over = [0, 1].map(|ch| {
+                        fill_current_block_buff(
+                            head,
+                            shared_buffer[write_exclusive][ch].as_mut_slice(),
+                            view[ch],
+                        )
+                    });
+
+                    // let spill_over_ch_0 = fill_current_block_buff(
+                    //     head,
+                    //     exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
+                    //     view_0,
+                    // );
+                    // let spill_over_ch_1 = fill_current_block_buff(
+                    //     head,
+                    //     exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
+                    //     view_1,
+                    // );
                     if let Err(_) = singnal_to_thread() {
                         return DecodeLoopResult::Error;
                     }
@@ -295,16 +317,24 @@ fn append_decode_buffer(
                             target_slice_spill_over.copy_from_slice(spill_over_view);
                         };
 
-                    fill_spill_over_block_buff(
-                        exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
-                        spill_over_ch_0,
-                    );
-                    fill_spill_over_block_buff(
-                        exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
-                        spill_over_ch_1,
-                    );
+                    // fill_spill_over_block_buff(
+                    //     exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
+                    //     spill_over_ch_0,
+                    // );
+                    // fill_spill_over_block_buff(
+                    //     exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
+                    //     spill_over_ch_1,
+                    // );
 
-                    head = spill_over_ch_0.len();
+                    for ch in 0..CHANNEL {
+                        fill_spill_over_block_buff(
+                            shared_buffer[write_exclusive][ch].as_mut_slice(),
+                            spill_over[ch],
+                        );
+                    }
+
+
+                    head = spill_over[0].len();
                 }
             }
             DecodeLoopResult::Ok
@@ -339,11 +369,11 @@ fn append_decode_buffer(
                 //println!("error: {error}")
             }
             DecodeResult::EndOfStream => {
-                let buf_ref_s = [
-                    exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
-                    exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
-                ];
-                for channel_data_ref in buf_ref_s {
+                // let buf_ref_s = [
+                //     exclusize_buf_ref_mut!(channel_left_data, write_exclusive),
+                //     exclusize_buf_ref_mut!(channel_right_data, write_exclusive),
+                // ];
+                for channel_data_ref in &mut shared_buffer[write_exclusive] {
                     channel_data_ref[head..].fill(0f32);
                 }
 
