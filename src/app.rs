@@ -96,14 +96,6 @@ impl App {
         app_state_container.player_control_singnal_sender = Some(player_control_signal_sender);
         let player_to_ui_singnal_sender = player_to_ui_signal_sender.clone();
 
-        // let mut ve_oscillo_width = 800;
-
-        // app_state_container.ve_shared_buffer = Some(array_init(|| {
-        //     array_init(|| OscilloscopeData(vec![0f32; ve_oscillo_width]))
-        // }));
-
-        
-
         let ve_shaerd_buffer_ptr = {
             let buffer_ref = &mut self.app_state_container.ve_shared_buffer;
             AtomicPtr::new(&raw mut *buffer_ref)

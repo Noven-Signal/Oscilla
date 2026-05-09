@@ -3,11 +3,9 @@ use std::{
     time::Duration,
 };
 
+use rand::RngReader;
 use ratatui::{
-    prelude::{Buffer, Rect},
-    style::{Color, Style, Stylize},
-    symbols::{self, Marker},
-    widgets::{Axis, Chart, Dataset, GraphType, StatefulWidget, Tabs, Widget},
+    layout::{Constraint, Direction, Layout}, prelude::{Buffer, Rect}, style::{Color, Style, Styled, Stylize}, symbols::{self, Marker}, text::{Line, Span}, widgets::{Axis, Chart, Dataset, GraphType, StatefulWidget, Tabs, Widget}
 };
 
 use crate::{
@@ -32,41 +30,66 @@ impl StatefulWidget for EffectArea {
             crate::AppState::AppState::Tabs::EffectArea
         )
         .render(area, buf);
-
-        let tabs = Tabs::new(vec!["Tab1", "Tab2", "Tab3"])
-            .style(Color::White)
+    
+        let tabs = Tabs::new(vec![Line::from("off").style(Color::White), "oscilloscope".into()])
             .highlight_style(Style::default().magenta().on_black().bold())
-            .select(0)
-            .divider(symbols::DOT)
+            .select(1)
+            .divider(Span::from("|").style(Color::White))
             .padding(" ", " ");
 
         tabs.render(area, buf);
 
-        //let arr: Vec<(f64, f64)> = (0..400).map(|x| (x as f64, (x as f64).sin())).collect();
-        let arr = ve_shared_buffer[state.ve_read_exclusive][0].0.as_slice();
-        let arr = &arr
-            .into_iter()
-            .enumerate()
-            .map(|(i, value)| (i as f64, *value as f64))
-            .collect::<Vec<_>>();
-
-        let dataset = Dataset::default()
-            .marker(Marker::Braille)
-            .graph_type(GraphType::Line)
-            .style(Color::Yellow)
-            .data(arr);
+        let [left_ch_area, right_ch_area] = area.margin(None).layout(
+            &Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Fill(1), Constraint::Fill(1)]),
+        );
 
         let AppStateContainer {
             playing_track_info: Some(PlayingTrackInfo { sample_rate, .. }),
             ..
-        } = state else { return;};
+        } = state
+        else {
+            return;
+        };
 
-        let x_axis = Axis::default().bounds([0.0, *sample_rate as f64 / 60f64 ]);
+        struct RenderChannelInfo<'a> {
+            pub area: Rect,
+            pub data: &'a [(f64, f64)],
+        }
+        let mut render_channel_wave = |render_channel_info: RenderChannelInfo| {
+            let dataset = Dataset::default()
+                .marker(Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Color::Yellow)
+                .data(render_channel_info.data);
 
-        let y_axis = Axis::default().bounds([-1.0, 1.0]);
+            let x_axis = Axis::default().bounds([0.0, *sample_rate as f64 / 60f64]);
 
-        let chart = Chart::new(vec![dataset]).x_axis(x_axis).y_axis(y_axis);
+            let y_axis = Axis::default().bounds([-1.1, 1.1]);
 
-        Widget::render(chart, area.margin(None), buf);
+            let chart = Chart::new(vec![dataset]).x_axis(x_axis).y_axis(y_axis);
+
+            Widget::render(chart, render_channel_info.area, buf);
+        };
+
+        let info = {
+            let get_data_wave_data_slice =
+                |i: usize| ve_shared_buffer[state.ve_read_exclusive][i].0.as_slice();
+            [
+                RenderChannelInfo {
+                    area: left_ch_area,
+                    data: get_data_wave_data_slice(0),
+                },
+                RenderChannelInfo {
+                    area: right_ch_area,
+                    data: get_data_wave_data_slice(1),
+                },
+            ]
+        };
+
+        for ele in info {
+            render_channel_wave(ele);
+        }
     }
 }

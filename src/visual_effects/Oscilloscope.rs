@@ -10,7 +10,7 @@ use crate::{
     utils::array_init,
 };
 
-const FRAME_RATE:usize = 60;
+const FRAME_RATE: usize = 60;
 
 pub fn ve_loop(
     shared_buffer: &SharedBuffer,
@@ -42,15 +42,19 @@ pub fn ve_loop(
     let mut write_exclusive: usize = 0;
     let mut count = 0;
 
-    let (ve_shared_buffer,move_window) = {
+    let (ve_shared_buffer, move_window) = {
         let sample_rate = match ve_control_signal_recv.blocking_recv() {
             Some(VeControlSignal::NoticeSampleRate(sample_rate)) => sample_rate,
             None => return,
         };
         let move_window = sample_rate / FRAME_RATE;
-        *ve_shared_buffer = Some(array_init(|| {
-            array_init(|| OscilloscopeData(vec![0f32; move_window]))
-        }));
+
+        *ve_shared_buffer = {
+            let crate_move_window_size_vec =
+                || (0..move_window).map(|i| (i as f64, 0f64)).collect();
+            let arr = array_init(|| array_init(|| OscilloscopeData(crate_move_window_size_vec())));
+            Some(arr)
+        };
         let buffer_ref = ve_shared_buffer
             .as_mut()
             .expect("must be init above statement");
@@ -84,6 +88,11 @@ pub fn ve_loop(
         //         _ => break 'l1,
         //     }
         // }
+        fn mem_copy_with_conversion(src: &[f32], target: &mut [(f64, f64)]) {
+            for (i, ele) in src.iter().enumerate() {
+                target[i].1 = *ele as f64;
+            }
+        }
 
         let available = ve_shared_buffer[write_exclusive][0].0.len() - ve_buff_write_head;
 
@@ -91,7 +100,8 @@ pub fn ve_loop(
             for ch in 0..CHANNEL {
                 let target = &mut ve_shared_buffer[write_exclusive][ch].0;
                 let src = &shared_buffer[read_exclusive][ch][read_head..read_head + target.len()];
-                target.copy_from_slice(src);
+
+                mem_copy_with_conversion(src, target);
             }
         };
 
@@ -117,7 +127,9 @@ pub fn ve_loop(
                         let src = &shared_buffer[read_exclusive][ch][read_head..];
                         let target =
                             &mut ve_shared_buffer[write_exclusive][ch].0[0..BLOCK_SIZE - read_head];
-                        target.copy_from_slice(src);
+                        //target.copy_from_slice(src);
+
+                        mem_copy_with_conversion(src, target);
                     }
                 }
 
@@ -134,7 +146,9 @@ pub fn ve_loop(
                     for ch in 0..CHANNEL {
                         let src = &shared_buffer[read_exclusive][ch][src_start..moved_head];
                         let target = &mut ve_shared_buffer[write_exclusive][ch].0[target_start..];
-                        target.copy_from_slice(src);
+                        //target.copy_from_slice(src);
+
+                        mem_copy_with_conversion(src, target);
                     }
                 }
                 read_head = moved_head;

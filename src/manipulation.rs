@@ -57,7 +57,7 @@ pub enum VeControlSignal {
 pub type SharedBuffer = [[Vec<f32>; CHANNEL]; NUM_OF_BLOCK];
 
 #[derive(Debug)]
-pub struct OscilloscopeData(pub Vec<f32>);
+pub struct OscilloscopeData(pub Vec<(f64,f64)>);
 pub type VESharedBuffer = [[OscilloscopeData; CHANNEL]; NUM_OF_BLOCK_VE];
 
 pub const BLOCK_SIZE: usize = 16 * 1024;
