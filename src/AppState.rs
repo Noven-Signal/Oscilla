@@ -1,12 +1,12 @@
 pub mod AppState {
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime};
 
     use crossterm::event::KeyCode;
     use ratatui::widgets::ListState;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-    use crate::manipulation::PlayerControlSignal;
+    use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
     use crate::widgets::ListArea::ListArea;
@@ -144,6 +144,7 @@ pub mod AppState {
         pub sample_rate: u32,
         pub track_duraion: Duration,
         pub current_played_duration: Duration,
+        pub audio_device_buffered_duration: Duration
     }
 
     pub enum PlayState {
@@ -172,6 +173,10 @@ pub mod AppState {
         pub play_state: PlayState,
         pub playing_track_info: Option<PlayingTrackInfo>,
         pub player_control_singnal_sender: Option<UnboundedSender<PlayerControlSignal>>,
+        pub ve_shared_buffer: Option<VESharedBuffer>,
+        // pub ui_to_ve_signal_sender: Option<UnboundedSender<UiVEThreadSyncSignal>>,
+        // pub ve_to_ui_signal_recv: Option<UnboundedReceiver<UiVEThreadSyncSignal>>,
+        pub ve_read_exclusive: usize
     }
 
     impl AppStateContainer {
@@ -187,6 +192,10 @@ pub mod AppState {
                 play_state: PlayState::Stop,
                 player_control_singnal_sender: None,
                 playing_track_info: None,
+                ve_shared_buffer: None,
+                // ui_to_ve_signal_sender: None,
+                // ve_to_ui_signal_recv: None,
+                ve_read_exclusive: 0    
             }
         }
     }

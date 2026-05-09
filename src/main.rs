@@ -24,6 +24,8 @@ mod manipulation;
 mod tui;
 mod widgets;
 mod visual_effects;
+mod utils;
+mod event_handler;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {

@@ -1,7 +1,7 @@
 use core::panic;
 use core::result::Result::Ok;
 use std::cmp;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use imp::CreateEventW;
 use std::ops::Range;
@@ -15,7 +15,7 @@ use windows::{
     core::*,
 };
 
-use crate::app::PlayerToUISingnal;
+use crate::app::{PlayedFrames, PlayerToUISingnal};
 use crate::manipulation::{
     BLOCK_SIZE, CHANNEL, DecoderRendererSyncSignal, RendererControlSignal, SharedBuffer,
 };
@@ -222,14 +222,6 @@ impl<'a> AudioOutput<'a> {
                 unsafe { std::slice::from_raw_parts_mut(ptr as *mut f32, available * CHANNEL) }
             };
 
-            // macro_rules! dec_get_block_clo {
-            //     ($ident: ident,$tt:tt) => {
-            //         let $ident = |read_exclusive: usize| &self.shared_buffer.$tt[read_exclusive];
-            //     };
-            // }
-            // dec_get_block_clo!(get_block_left, channel_left_data);
-            // dec_get_block_clo!(get_block_right, channel_right_data);
-
             let mut fill_buff_within_block = || {
                 let get_src_slice =
                     |ch: usize| &self.shared_buffer[read_exclusive][ch][head..head + available];
@@ -308,7 +300,10 @@ impl<'a> AudioOutput<'a> {
             self.render_client.ReleaseBuffer(available as u32, 0)?;
             count = count + 1;
             self.player_to_ui_singnal_sender
-                .send(PlayerToUISingnal::PlayedFrames(available as u32));
+                .send(PlayerToUISingnal::PlayedFrames(PlayedFrames {
+                    frames: (available as u32),
+                    buffered_frames: padding as u32,
+                }));
         }
 
         //sleep(Duration::from_millis(500));

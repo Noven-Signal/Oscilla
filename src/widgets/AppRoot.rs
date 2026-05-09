@@ -6,7 +6,8 @@ use crate::extensions::OnceLock::OnceLock_ext;
 use crate::extensions::Rect::RectExtension;
 use crate::extensions::SelectBlock::SelectedBlock;
 use crate::widgets::BottomPart::BottomPart;
-use crate::widgets::ListArea::*;
+
+use crate::widgets::{EffectArea::*, ListArea::*};
 use crate::{AppState, get_decorated_border};
 
 #[derive(Default, Clone, Copy)]
@@ -29,10 +30,7 @@ impl StatefulWidget for AppRoot {
         );
 
         ListArea::default().render(list_area, buf, state);
-        //f.render_stateful_widget(list, list_area.margin(None), &mut state);
-        Block::default().render(effect_area, buf);
-        //f.render_widget(Block::default(), effect_area);
-        BottomPart::default().render(bottom, buf,state);
-        //f.render_widget(BottomPart::default(), bottom);
+        EffectArea::default().render(effect_area, buf, state);
+        BottomPart::default().render(bottom, buf, state);
     }
 }
