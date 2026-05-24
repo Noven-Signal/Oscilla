@@ -1,11 +1,12 @@
 use std::cmp;
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     manipulation::{
-        BLOCK_SIZE, CHANNEL, DecoderVisualEffectThreadSyncSignal, NUM_OF_BLOCK_VE,
-        OscilloscopeData, SharedBuffer, UiVEThreadSyncSignal, VESharedBuffer, VeControlSignal,
+        BLOCK_SIZE, CHANNEL, DecorderToVeSyncSignal, NUM_OF_BLOCK_VE, OscilloscopeData,
+        SharedBuffer, UiVEThreadSyncSignal, VESharedBuffer, VeControlSignal, VeToDecoderSyncSignal,
     },
     utils::array_init,
 };
@@ -15,38 +16,27 @@ const FRAME_RATE: usize = 60;
 pub fn ve_loop(
     shared_buffer: &SharedBuffer,
     ve_shared_buffer: &mut Option<VESharedBuffer>,
-    ve_to_decoder_signal_sender: UnboundedSender<DecoderVisualEffectThreadSyncSignal>,
-    mut decoder_to_ve_recv: UnboundedReceiver<DecoderVisualEffectThreadSyncSignal>,
-    ve_to_ui_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
-    mut ui_to_ve_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
-    mut ve_control_signal_recv: UnboundedReceiver<VeControlSignal>,
+    ve_to_decoder_signal_sender: UnboundedSender<VeToDecoderSyncSignal>,
+    mut decoder_to_ve_recv: UnboundedReceiver<DecorderToVeSyncSignal>,
+    ve_to_ui_signal_sender: &UnboundedSender<UiVEThreadSyncSignal>,
+    ui_to_ve_recv: &mut UnboundedReceiver<UiVEThreadSyncSignal>,
+    ve_cancellation_token: CancellationToken,
+    sample_rate: usize,
+    mut read_exclusive: usize,
 ) {
     let next_block = |read_exclusive| match read_exclusive {
         7 => 0,
         read_exclusive => read_exclusive + 1,
     };
 
-    let mut signal_to_decoder_thread = || {
-        decoder_to_ve_recv.blocking_recv();
-        ve_to_decoder_signal_sender.send(DecoderVisualEffectThreadSyncSignal())
-    };
-
-    let mut signal_to_ui_thread = || {
-        ui_to_ve_recv.blocking_recv();
-        ve_to_ui_signal_sender.send(UiVEThreadSyncSignal())
-    };
-
     let mut read_head: usize = 0;
     let mut ve_buff_write_head: usize = 0;
-    let mut read_exclusive: usize = 0;
+    //let mut read_exclusive = read_exclusive;
+
     let mut write_exclusive: usize = 0;
     let mut count = 0;
 
     let (ve_shared_buffer, move_window) = {
-        let sample_rate = match ve_control_signal_recv.blocking_recv() {
-            Some(VeControlSignal::NoticeSampleRate(sample_rate)) => sample_rate,
-            None => return,
-        };
         let move_window = sample_rate / FRAME_RATE;
 
         *ve_shared_buffer = {
@@ -62,7 +52,15 @@ pub fn ve_loop(
         (buffer_ref, move_window)
     };
 
-    _ = signal_to_decoder_thread();
+    let mut signal_to_decoder_thread = || {
+        decoder_to_ve_recv.blocking_recv();
+        ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal())
+    };
+
+    let mut signal_to_ui_thread = || {
+        ui_to_ve_recv.blocking_recv();
+        ve_to_ui_signal_sender.send(UiVEThreadSyncSignal())
+    };
 
     // loop {
     //     signal_to_decoder_thread();
@@ -73,21 +71,10 @@ pub fn ve_loop(
     // return;
 
     'l1: loop {
-        // 'control_singal_loop: loop {
-        //     if ve_control_signal_recv.is_empty() {
-        //         break 'control_singal_loop;
-        //     }
+        if ve_cancellation_token.is_cancelled() {
+            break 'l1;
+        }
 
-        //     let reciever = &mut ve_control_signal_recv;
-        //     match reciever.blocking_recv() {
-        //         Some(RendererControlSignal::Stop) => {
-        //             _ = self.audio_client.Stop();
-        //             _ = signal_to_decoder_thread();
-        //             break 'l1;
-        //         }
-        //         _ => break 'l1,
-        //     }
-        // }
         fn mem_copy_with_conversion(src: &[f32], target: &mut [(f64, f64)]) {
             for (i, ele) in src.iter().enumerate() {
                 target[i].1 = *ele as f64;
@@ -100,7 +87,6 @@ pub fn ve_loop(
             for ch in 0..CHANNEL {
                 let target = &mut ve_shared_buffer[write_exclusive][ch].0;
                 let src = &shared_buffer[read_exclusive][ch][read_head..read_head + target.len()];
-
                 mem_copy_with_conversion(src, target);
             }
         };

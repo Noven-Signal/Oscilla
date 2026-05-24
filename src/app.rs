@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     pin::Pin,
     sync::atomic::{AtomicPtr, Ordering},
     time::{Duration, SystemTime},
@@ -12,8 +13,8 @@ use crate::{
     app,
     // event_handler::{EventHandler, EventHndlerToAppSignal},
     manipulation::{
-        self, BLOCK_SIZE, NUM_OF_BLOCK_VE, OscilloscopeData, PlayerControlSignal,
-        UiVEThreadSyncSignal, VESharedBuffer,
+        self, BLOCK_SIZE, DecoderControlSignal::VeDisabled, NUM_OF_BLOCK_VE, OscilloscopeData,
+        PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer,
     },
     tui::Tui,
     utils::array_init,
@@ -25,6 +26,7 @@ use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use futures::{FutureExt, StreamExt, future};
 use ratatui::{prelude::Rect, widgets::StatefulWidget};
 use serde::{Deserialize, Serialize};
+use symphonia::core::units::TimeStamp;
 use tokio::{
     io::join,
     join, pin,
@@ -35,6 +37,12 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use windows::Win32::System::Com::IInternalUnknown;
 
+struct Ves {
+    pub ui_to_ve_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
+    pub ve_to_ui_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
+    pub ve_buffer_duration_offset_sec: f64,
+}
+
 pub struct App {
     root_wiget: AppRoot,
     tui: Tui,
@@ -42,6 +50,7 @@ pub struct App {
     // event_handler_to_app_signal_recv: UnboundedReceiver<EventHndlerToAppSignal>,
     // player_to_ui_signal_sender: UnboundedSender<PlayerToUISingnal>,
     //player_to_ui_singnal_receiver: UnboundedReceiver<PlayerToUISingnal>,
+    ve_channel: Option<Ves>,
     event_loop_canceled: bool,
     ve_event_tick_enabled: bool,
 }
@@ -63,6 +72,13 @@ pub struct PlayedFrames {
 pub enum PlayerToUISingnal {
     NoticeTrackInfo(TrackInfo),
     PlayedFrames(PlayedFrames),
+    VeEnabled(PlayerToUISingnalVeEnabled),
+}
+
+pub struct PlayerToUISingnalVeEnabled {
+    pub ui_to_ve_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
+    pub ve_to_ui_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
+    pub ve_buffer_duration_offset_sec: f64,
 }
 
 impl App {
@@ -78,14 +94,15 @@ impl App {
             //player_to_ui_singnal_receiver,
             event_loop_canceled: false,
             ve_event_tick_enabled: false,
+            ve_channel: None,
         })
     }
 
     async fn init_auto_play(
         &mut self,
         player_to_ui_signal_sender: UnboundedSender<PlayerToUISingnal>,
-        ve_to_ui_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
-        ui_to_ve_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
+        // ve_to_ui_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
+        // ui_to_ve_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
     ) -> JoinHandle<()> {
         let app_state_container = &mut self.app_state_container;
 
@@ -110,8 +127,8 @@ impl App {
                 first_track,
                 &mut player_control_signal_recv,
                 player_to_ui_singnal_sender,
-                ve_to_ui_signal_sender,
-                ui_to_ve_signal_recv,
+                // ve_to_ui_signal_sender,
+                // ui_to_ve_signal_recv,
                 ve_shaerd_buffer_ptr,
             )
             .await;
@@ -130,27 +147,27 @@ impl App {
     pub async fn run(&mut self) -> color_eyre::Result<()> {
         let (player_to_ui_signal_sender, player_to_ui_singnal_receiver) = unbounded_channel();
 
-        let (ve_to_ui_signal_sender, ve_to_ui_signal_recv) = unbounded_channel();
-        let (ui_to_ve_signal_sender, ui_to_ve_signal_recv) = unbounded_channel();
+        // let (ve_to_ui_signal_sender, ve_to_ui_signal_recv) = unbounded_channel();
+        // let (ui_to_ve_signal_sender, ui_to_ve_signal_recv) = unbounded_channel();
 
-        for _ in 0..NUM_OF_BLOCK_VE - 2 {
-            ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
-        }
+        // for _ in 0..NUM_OF_BLOCK_VE - 2 {
+        //     ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
+        // }
 
         let init_auto_play_handle = self
             .init_auto_play(
                 player_to_ui_signal_sender,
-                ve_to_ui_signal_sender,
-                ui_to_ve_signal_recv,
+                // ve_to_ui_signal_sender,
+                // ui_to_ve_signal_recv,
             )
             .await;
 
         self.tui.enter()?;
 
         self.event_loop(
-            ui_to_ve_signal_sender,
+            //     ui_to_ve_signal_sender,
             player_to_ui_singnal_receiver,
-            ve_to_ui_signal_recv,
+            //   ve_to_ui_signal_recv,
         )
         .await?;
 
@@ -167,41 +184,75 @@ impl App {
 
     pub async fn event_loop(
         &mut self,
-        ui_to_ve_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
+        // ui_to_ve_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
         mut player_to_ui_singnal_receiver: UnboundedReceiver<PlayerToUISingnal>,
-        mut ve_to_ui_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
+        //   mut ve_to_ui_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
     ) -> color_eyre::Result<()> {
         let mut event_stream = EventStream::new();
 
-        let mut interval = tokio::time::interval(Duration::from_secs_f64(1f64 / 62f64));
-
+        let mut interval = tokio::time::interval(Duration::from_secs_f64(1f64 / 60f64));
         let mut ve_frame_count: u32 = 0;
-        let is_less_frame_count_vs_actual_played = |s: &Self, ve_frame_count: &u32| {
-            let Some(track_info) = &s.app_state_container.playing_track_info else {
-                return false;
-            };
-            track_info
-                .current_played_duration
-                .saturating_sub(track_info.audio_device_buffered_duration)
-                > Duration::from_secs_f64(*ve_frame_count as f64 / 60f64)
-        };
+
         'l1: loop {
             if self.event_loop_canceled {
                 break 'l1;
             }
 
-            let mut ve_timing_awaiter = async |s: &Self, ve_frame_count: &u32| {
-                if self.ve_event_tick_enabled {
-                    interval.tick().await;
-                    let less = is_less_frame_count_vs_actual_played(s, ve_frame_count);
+            enum VeProcResult {
+                VeDisabled,
+                SyncRange(UnboundedSender<UiVEThreadSyncSignal>),
+                VeIsTooForward,
+            }
 
-                    if less {
-                        ve_to_ui_signal_recv.recv().await;
-                    }
-                    return less;
+            let mut ve_timing_awaiter = async |s: &Self| {
+                if let Some(_) = s.ve_channel {
+                    interval.tick().await;
                 } else {
                     future::pending::<()>().await;
-                    return false; //unreachable
+                }
+            };
+            let mut ve_proc = async |s: &mut Self, ve_frame_count: &mut u32| -> VeProcResult {
+                let Some(Ves {
+                    ref ui_to_ve_signal_sender,
+                    ref mut ve_to_ui_signal_recv,
+                    ve_buffer_duration_offset_sec: init_offset,
+                }) = s.ve_channel
+                else {
+                    return VeProcResult::VeDisabled;
+                };
+                let Some(track_info) = &s.app_state_container.playing_track_info else {
+                    return VeProcResult::VeDisabled;
+                };
+                let carib_played_duration = track_info
+                    .current_played_duration
+                    .saturating_sub(track_info.audio_device_buffered_duration)
+                    .as_secs_f64();
+
+                let ve_position = (*ve_frame_count as f64 / 60f64) + init_offset;
+                // dbg!(carib_played_duration);
+                // dbg!(ve_position);
+                const n1_60_dobule: f64 = 2f64 / 60f64;
+                const m_n1_60_dobule: f64 = -n1_60_dobule;
+                match carib_played_duration - ve_position {
+                    ..=m_n1_60_dobule => VeProcResult::VeIsTooForward,
+                    m_n1_60_dobule..=n1_60_dobule => {
+                        ve_to_ui_signal_recv.recv().await;
+                        VeProcResult::SyncRange(ui_to_ve_signal_sender.clone())
+                    }
+                    diff => {
+                        let num_of_frame_forward = (diff / n1_60_dobule).abs().floor() as u32;
+                        //dbg!(num_of_frame_forward);
+                        for _ in 0..num_of_frame_forward - 1 {
+                            //dbg!(i);
+                            ve_to_ui_signal_recv.recv().await;
+
+                            Self::ve_sync(&mut s.app_state_container).await;
+                            ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
+                            *ve_frame_count = *ve_frame_count + 1;
+                        }
+                        ve_to_ui_signal_recv.recv().await;
+                        VeProcResult::SyncRange(ui_to_ve_signal_sender.clone())
+                    }
                 }
             };
             tokio::select! {
@@ -215,12 +266,16 @@ impl App {
                     Some(Result::Ok(event)) => self.handle_crossterm_event(&event).await?,
                     _ => break 'l1,
                 },
-                less = ve_timing_awaiter(self,&ve_frame_count) =>'b1: {
-                    if !less{ break 'b1;}
-                    Self::ve_sync(&mut self.app_state_container).await;
+                _ = ve_timing_awaiter(self) =>'b1: {
+                    let proc_res = ve_proc(self,&mut ve_frame_count).await;
+                    let VeProcResult::SyncRange(ui_to_ve_signal_sender) = proc_res else { break 'b1;};
+
                     _ = self.render();
+                    Self::ve_sync(&mut self.app_state_container).await;
+
                     ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
                     ve_frame_count = ve_frame_count+1;
+
                 },
             };
         }
@@ -240,9 +295,14 @@ impl App {
                 });
 
                 if let Some(sender) = &self.app_state_container.player_control_singnal_sender {
-                    sender.send(PlayerControlSignal::NoticeSampleRate(
-                        track_info.sample_rate as usize,
-                    ));
+                    let sender = sender.clone();
+                    tokio::spawn(async move {
+                        //tokio::time::sleep(Duration::from_secs(1)).await;
+                        // sender.send(PlayerControlSignal::VeEnabled);
+                    });
+
+                    sender.send(PlayerControlSignal::VeEnabled);
+                    //self.ve_event_tick_enabled = true;
                 }
 
                 self.render()?;
@@ -251,7 +311,6 @@ impl App {
                 frames,
                 buffered_frames,
             }) => 'b1: {
-                self.ve_event_tick_enabled = true;
                 let Some(ref mut track_info) = *playing_tarck_info else {
                     break 'b1;
                 };
@@ -269,6 +328,17 @@ impl App {
                 if before_duration.as_secs() != after_duration.as_secs() {
                     self.render()?;
                 }
+            }
+            PlayerToUISingnal::VeEnabled(PlayerToUISingnalVeEnabled {
+                ui_to_ve_signal_sender,
+                ve_to_ui_signal_recv,
+                ve_buffer_duration_offset_sec,
+            }) => {
+                self.ve_channel = Some(Ves {
+                    ui_to_ve_signal_sender,
+                    ve_to_ui_signal_recv,
+                    ve_buffer_duration_offset_sec,
+                })
             }
         }
         Ok(())
