@@ -47,12 +47,8 @@ pub struct App {
     root_wiget: AppRoot,
     tui: Tui,
     app_state_container: AppStateContainer,
-    // event_handler_to_app_signal_recv: UnboundedReceiver<EventHndlerToAppSignal>,
-    // player_to_ui_signal_sender: UnboundedSender<PlayerToUISingnal>,
-    //player_to_ui_singnal_receiver: UnboundedReceiver<PlayerToUISingnal>,
     ve_channel: Option<Ves>,
     event_loop_canceled: bool,
-    ve_event_tick_enabled: bool,
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -90,10 +86,7 @@ impl App {
             tui: Tui::new()?.mouse(true).paste(true),
             root_wiget: root_wiget,
             app_state_container: app_state_container,
-            // player_to_ui_signal_sender,
-            //player_to_ui_singnal_receiver,
             event_loop_canceled: false,
-            ve_event_tick_enabled: false,
             ve_channel: None,
         })
     }
@@ -101,8 +94,6 @@ impl App {
     async fn init_auto_play(
         &mut self,
         player_to_ui_signal_sender: UnboundedSender<PlayerToUISingnal>,
-        // ve_to_ui_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
-        // ui_to_ve_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
     ) -> JoinHandle<()> {
         let app_state_container = &mut self.app_state_container;
 
@@ -127,8 +118,6 @@ impl App {
                 first_track,
                 &mut player_control_signal_recv,
                 player_to_ui_singnal_sender,
-                // ve_to_ui_signal_sender,
-                // ui_to_ve_signal_recv,
                 ve_shaerd_buffer_ptr,
             )
             .await;
@@ -147,27 +136,17 @@ impl App {
     pub async fn run(&mut self) -> color_eyre::Result<()> {
         let (player_to_ui_signal_sender, player_to_ui_singnal_receiver) = unbounded_channel();
 
-        // let (ve_to_ui_signal_sender, ve_to_ui_signal_recv) = unbounded_channel();
-        // let (ui_to_ve_signal_sender, ui_to_ve_signal_recv) = unbounded_channel();
-
-        // for _ in 0..NUM_OF_BLOCK_VE - 2 {
-        //     ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
-        // }
 
         let init_auto_play_handle = self
             .init_auto_play(
                 player_to_ui_signal_sender,
-                // ve_to_ui_signal_sender,
-                // ui_to_ve_signal_recv,
             )
             .await;
 
         self.tui.enter()?;
 
         self.event_loop(
-            //     ui_to_ve_signal_sender,
             player_to_ui_singnal_receiver,
-            //   ve_to_ui_signal_recv,
         )
         .await?;
 
@@ -184,9 +163,7 @@ impl App {
 
     pub async fn event_loop(
         &mut self,
-        // ui_to_ve_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
         mut player_to_ui_singnal_receiver: UnboundedReceiver<PlayerToUISingnal>,
-        //   mut ve_to_ui_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
     ) -> color_eyre::Result<()> {
         let mut event_stream = EventStream::new();
 
@@ -229,8 +206,7 @@ impl App {
                     .as_secs_f64();
 
                 let ve_position = (*ve_frame_count as f64 / 60f64) + init_offset;
-                // dbg!(carib_played_duration);
-                // dbg!(ve_position);
+
                 const n1_60_dobule: f64 = 2f64 / 60f64;
                 const m_n1_60_dobule: f64 = -n1_60_dobule;
                 match carib_played_duration - ve_position {
@@ -241,7 +217,6 @@ impl App {
                     }
                     diff => {
                         let num_of_frame_forward = (diff / n1_60_dobule).abs().floor() as u32;
-                        //dbg!(num_of_frame_forward);
                         for _ in 0..num_of_frame_forward - 1 {
                             //dbg!(i);
                             ve_to_ui_signal_recv.recv().await;
