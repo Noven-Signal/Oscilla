@@ -5,8 +5,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     manipulation::{
-        BLOCK_SIZE, CHANNEL, DecorderToVeSyncSignal, NUM_OF_BLOCK_VE, OscilloscopeData,
-        SharedBuffer, UiVEThreadSyncSignal, VESharedBuffer, VeControlSignal, VeToDecoderSyncSignal,
+        BLOCK_SIZE, CHANNEL, DecorderToVeSyncSignal, NUM_OF_BLOCK, NUM_OF_BLOCK_VE, OscilloscopeData, SharedBuffer, UiVEThreadSyncSignal, VESharedBuffer, VeControlSignal, VeToDecoderSyncSignal
     },
     utils::array_init,
 };
@@ -24,8 +23,9 @@ pub fn ve_loop(
     sample_rate: usize,
     mut read_exclusive: usize,
 ) {
+    const NUM_OF_BLOCK_LAST_INDEX:usize = NUM_OF_BLOCK - 1;
     let next_block = |read_exclusive| match read_exclusive {
-        7 => 0,
+        NUM_OF_BLOCK_LAST_INDEX => 0,
         read_exclusive => read_exclusive + 1,
     };
 
@@ -101,9 +101,7 @@ pub fn ve_loop(
             }
             Equal => {
                 fill_buff_within_block();
-                if let Err(_) = signal_to_decoder_thread() {
-                    break 'l1;
-                }
+                _ = signal_to_decoder_thread();
                 read_exclusive = next_block(read_exclusive);
                 read_head = 0;
             }
@@ -119,9 +117,7 @@ pub fn ve_loop(
                     }
                 }
 
-                if let Err(_) = signal_to_decoder_thread() {
-                    break 'l1;
-                }
+               _ = signal_to_decoder_thread();
 
                 read_exclusive = next_block(read_exclusive);
 

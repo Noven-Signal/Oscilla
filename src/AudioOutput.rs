@@ -17,7 +17,7 @@ use windows::{
 
 use crate::app::{PlayedFrames, PlayerToUISingnal};
 use crate::manipulation::{
-    BLOCK_SIZE, CHANNEL, DecoderRendererSyncSignal, RendererControlSignal, SharedBuffer,
+    AUDIO_OUTPUT_BUFFER_DURATION, BLOCK_SIZE, CHANNEL, DecoderRendererSyncSignal, NUM_OF_BLOCK, RendererControlSignal, SharedBuffer
 };
 
 pub fn main(
@@ -129,11 +129,10 @@ impl<'a> AudioOutput<'a> {
         // );
         // println!("format_tag={:#x}", format_tag);
         // 1 second buffer duration (100-nanosecond units)
-        let duration: i64 = 10_000_000;
         audio_client.Initialize(
             AUDCLNT_SHAREMODE_SHARED,
             AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-            duration,
+            AUDIO_OUTPUT_BUFFER_DURATION.as_nanos() as i64 / 100,
             0,
             wave_format_ptr,
             Some(null()),
@@ -146,8 +145,10 @@ impl<'a> AudioOutput<'a> {
 
     #[allow(unsafe_op_in_unsafe_fn)]
     unsafe fn render_loop(&mut self) -> Result<()> {
+        
+        const NUM_OF_BLOCK_LAST_INDEX: usize = NUM_OF_BLOCK - 1;
         let next_block = |read_exclusive| match read_exclusive {
-            7 => 0,
+            NUM_OF_BLOCK_LAST_INDEX => 0,
             read_exclusive => read_exclusive + 1,
         };
 

@@ -136,19 +136,11 @@ impl App {
     pub async fn run(&mut self) -> color_eyre::Result<()> {
         let (player_to_ui_signal_sender, player_to_ui_singnal_receiver) = unbounded_channel();
 
-
-        let init_auto_play_handle = self
-            .init_auto_play(
-                player_to_ui_signal_sender,
-            )
-            .await;
+        let init_auto_play_handle = self.init_auto_play(player_to_ui_signal_sender).await;
 
         self.tui.enter()?;
 
-        self.event_loop(
-            player_to_ui_singnal_receiver,
-        )
-        .await?;
+        self.event_loop(player_to_ui_singnal_receiver).await?;
 
         if let Some(ref mut sender) = self.app_state_container.player_control_singnal_sender {
             sender.send(PlayerControlSignal::Stop)?;
@@ -200,10 +192,7 @@ impl App {
                 let Some(track_info) = &s.app_state_container.playing_track_info else {
                     return VeProcResult::VeDisabled;
                 };
-                let carib_played_duration = track_info
-                    .current_played_duration
-                    .saturating_sub(track_info.audio_device_buffered_duration)
-                    .as_secs_f64();
+                let carib_played_duration = track_info.get_carib_duration().as_secs_f64();
 
                 let ve_position = (*ve_frame_count as f64 / 60f64) + init_offset;
 
@@ -262,21 +251,19 @@ impl App {
         let playing_tarck_info = &mut self.app_state_container.playing_track_info;
         match signal {
             PlayerToUISingnal::NoticeTrackInfo(track_info) => {
-                *playing_tarck_info = Some(PlayingTrackInfo {
-                    track_duraion: track_info.track_duration,
-                    current_played_duration: Duration::ZERO,
-                    sample_rate: track_info.sample_rate,
-                    audio_device_buffered_duration: Duration::ZERO,
-                });
+                *playing_tarck_info = Some(PlayingTrackInfo::new(
+                    track_info.sample_rate,
+                    track_info.track_duration,
+                ));
 
                 if let Some(sender) = &self.app_state_container.player_control_singnal_sender {
                     let sender = sender.clone();
                     tokio::spawn(async move {
-                        //tokio::time::sleep(Duration::from_secs(1)).await;
-                        // sender.send(PlayerControlSignal::VeEnabled);
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                        sender.send(PlayerControlSignal::VeEnabled);
                     });
 
-                    sender.send(PlayerControlSignal::VeEnabled);
+                    //sender.send(PlayerControlSignal::VeEnabled);
                     //self.ve_event_tick_enabled = true;
                 }
 
@@ -290,16 +277,10 @@ impl App {
                     break 'b1;
                 };
 
-                let add_duration =
-                    Duration::from_secs_f64(frames as f64 / track_info.sample_rate as f64);
-                let before_duration = track_info.current_played_duration;
-                let after_duration = track_info
-                    .current_played_duration
-                    .saturating_add(add_duration);
-                track_info.current_played_duration = after_duration;
-                track_info.audio_device_buffered_duration = Duration::from_secs_f64(
-                    (buffered_frames + frames) as f64 / track_info.sample_rate as f64,
-                );
+                let before_duration = track_info.get_carib_duration();
+                track_info.set_played_duration(frames, buffered_frames);
+                let after_duration = track_info.get_carib_duration();
+
                 if before_duration.as_secs() != after_duration.as_secs() {
                     self.render()?;
                 }

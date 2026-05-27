@@ -143,8 +143,33 @@ pub mod AppState {
     pub struct PlayingTrackInfo {
         pub sample_rate: u32,
         pub track_duraion: Duration,
-        pub current_played_duration: Duration,
-        pub audio_device_buffered_duration: Duration
+        current_played_duration: Duration,
+        audio_device_buffered_duration: Duration,
+    }
+
+    impl PlayingTrackInfo {
+        pub fn new(sample_rate: u32, track_duraion: Duration) -> Self {
+            Self {
+                sample_rate,
+                track_duraion,
+                current_played_duration: Duration::ZERO,
+                audio_device_buffered_duration: Duration::ZERO,
+            }
+        }
+
+        pub fn get_carib_duration(&self) -> Duration {
+            self.current_played_duration
+                .saturating_sub(self.audio_device_buffered_duration)
+        }
+
+        pub fn set_played_duration(&mut self, add_frames: u32, buffered_frames: u32) {
+            let add_duration = Duration::from_secs_f64(add_frames as f64 / self.sample_rate as f64);
+
+            self.current_played_duration = self.current_played_duration.saturating_add(add_duration);
+            self.audio_device_buffered_duration = Duration::from_secs_f64(
+                (buffered_frames + add_frames) as f64 / self.sample_rate as f64,
+            );
+        }
     }
 
     pub enum PlayState {
@@ -176,7 +201,7 @@ pub mod AppState {
         pub ve_shared_buffer: Option<VESharedBuffer>,
         // pub ui_to_ve_signal_sender: Option<UnboundedSender<UiVEThreadSyncSignal>>,
         // pub ve_to_ui_signal_recv: Option<UnboundedReceiver<UiVEThreadSyncSignal>>,
-        pub ve_read_exclusive: usize
+        pub ve_read_exclusive: usize,
     }
 
     impl AppStateContainer {
@@ -195,7 +220,7 @@ pub mod AppState {
                 ve_shared_buffer: None,
                 // ui_to_ve_signal_sender: None,
                 // ve_to_ui_signal_recv: None,
-                ve_read_exclusive: 0    
+                ve_read_exclusive: 0,
             }
         }
     }

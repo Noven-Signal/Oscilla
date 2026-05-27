@@ -1,12 +1,8 @@
 use std::{
-    fmt::Debug,
-    panic,
-    path::Path,
-    sync::{
+    cmp, fmt::Debug, panic, path::Path, sync::{
         Arc,
         atomic::{AtomicPtr, Ordering},
-    },
-    time::Duration,
+    }, time::Duration
 };
 
 use futures::{future::join, join};
@@ -37,7 +33,7 @@ pub enum DecoderToPlayerNotification {
 }
 pub struct VeEnabledInfoFromDecoder {
     pub sample_rate: usize,
-    pub renderer_read_exclusize: usize,
+    pub ve_start_read_exclusize: usize,
     pub decorder_to_ve_signal_recv: UnboundedReceiver<DecorderToVeSyncSignal>,
     pub ve_to_decoder_signal_sender: UnboundedSender<VeToDecoderSyncSignal>,
     pub ve_buffer_duration_offset_sec: f64,
@@ -109,8 +105,10 @@ pub type VESharedBuffer = [[OscilloscopeData; CHANNEL]; NUM_OF_BLOCK_VE];
 
 pub const BLOCK_SIZE: usize = 16 * 1024;
 pub const CHANNEL: usize = 2;
-pub const NUM_OF_BLOCK: usize = 8;
-pub const NUM_OF_BLOCK_VE: usize = 8;
+pub const NUM_OF_BLOCK: usize = 16;
+pub const BACK_ROOM: usize = 4;
+pub const NUM_OF_BLOCK_VE: usize = 180;
+pub const AUDIO_OUTPUT_BUFFER_DURATION: Duration = Duration::from_secs(1);
 
 pub async fn play_executor(
     playback_file_path: &str,
@@ -195,7 +193,7 @@ pub async fn play_executor(
         );
     });
 
-    for _ in 0..NUM_OF_BLOCK - 2 {
+    for _ in 0..NUM_OF_BLOCK - 2 - BACK_ROOM {
         renderer_to_decoder_sender.send(DecoderRendererSyncSignal());
         //ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal());
     }
@@ -248,7 +246,7 @@ pub async fn play_executor(
                 })) => {
                     _ = sender.send(VeEnabledInfoFromPlayerToVe {
                         sample_rate: ve_enabled_info.sample_rate,
-                        renderer_read_exclusize: ve_enabled_info.renderer_read_exclusize,
+                        renderer_read_exclusize: ve_enabled_info.ve_start_read_exclusize,
                         decorder_to_ve_signal_recv: ve_enabled_info.decorder_to_ve_signal_recv,
                         ve_to_decoder_signal_sender: ve_enabled_info.ve_to_decoder_signal_sender,
                         ve_to_ui_signal_sender,
@@ -388,9 +386,9 @@ fn append_decode_buffer(
 
     // let decoder_to_ve_signal_sender: Option<UnboundedSender<DecorderToVeSyncSignal>> = Some(decoder_to_ve_signal_sender);
     // let mut ve_to_decoder_signal_recv: Option<UnboundedReceiver<VeToDecoderSyncSignal>> = Some(ve_to_decoder_signal_recv);
-
+    const NUM_OF_BLOCK_LAST_INDEX: usize = NUM_OF_BLOCK - 1;
     let next_block = |write_end| match write_end {
-        7 => 0,
+        NUM_OF_BLOCK_LAST_INDEX => 0,
         write_end => write_end + 1,
     };
 
@@ -435,8 +433,8 @@ fn append_decode_buffer(
                     sample_rate,
                 })) => {
                     let len = renderer_to_decoder_singal_recv.len();
-
-                    let renderer_read_exclusize = (write_exclusive + len + 1) % NUM_OF_BLOCK;
+                    
+                    let ve_start_read_exclusize = (write_exclusive + len + 1) % NUM_OF_BLOCK;
                     for _ in 0..len {
                         ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal());
                     }
@@ -445,18 +443,23 @@ fn append_decode_buffer(
                         decoder_to_ve_signal_sender.send(DecorderToVeSyncSignal());
                     }
 
-                    let target_block_count =
-                        block_count as i32 + len as i32 + 1 - NUM_OF_BLOCK as i32;
+                    let ve_buffer_duration_offset_sec = {
+                        let target_block_count =
+                            block_count as i32 + len as i32 + 1 - NUM_OF_BLOCK as i32;
+
+                        let target_duration = (target_block_count as f64 * BLOCK_SIZE as f64)
+                            / file_sample_rate as f64;
+
+                        target_duration
+                    };
 
                     decoder_to_player_notification_signal.send(
                         DecoderToPlayerNotification::VeEnabledInfo(VeEnabledInfoFromDecoder {
                             sample_rate,
-                            renderer_read_exclusize,
+                            ve_start_read_exclusize,
                             decorder_to_ve_signal_recv,
                             ve_to_decoder_signal_sender,
-                            ve_buffer_duration_offset_sec: (target_block_count as f64
-                                * BLOCK_SIZE as f64)
-                                / file_sample_rate as f64,
+                            ve_buffer_duration_offset_sec,
                         }),
                     );
 

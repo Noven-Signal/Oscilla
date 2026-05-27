@@ -50,16 +50,16 @@ impl StatefulWidget for BottomPart {
                     format!("{:02}:{:02}", min, sec)
                 }
             }
-            label = track_info.current_played_duration.format_to_min_sec();
+            label = track_info.get_carib_duration().format_to_min_sec();
             ratio = {
-                let current = track_info.current_played_duration.as_secs_f64();
+                let current = track_info.get_carib_duration().as_secs_f64();
                 let total = track_info.track_duraion.as_secs_f64();
                 let ratio = current / total;
                 if ratio > 1f64 { 1f64 } else { ratio }
             };
             remaining_time_str = Duration::saturating_sub(
                 track_info.track_duraion,
-                track_info.current_played_duration,
+                track_info.get_carib_duration(),
             )
             .format_to_min_sec();
         } else {
