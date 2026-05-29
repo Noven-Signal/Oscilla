@@ -1,8 +1,13 @@
 use std::{
-    cmp, fmt::Debug, panic, path::Path, sync::{
+    cmp,
+    fmt::Debug,
+    panic,
+    path::Path,
+    sync::{
         Arc,
         atomic::{AtomicPtr, Ordering},
-    }, time::Duration
+    },
+    time::Duration,
 };
 
 use futures::{future::join, join};
@@ -11,7 +16,10 @@ use symphonia::{
     core::{audio::Signal, io::MediaSourceStream, probe::Hint},
     default::get_probe,
 };
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::{
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender, unbounded_channel},
+    task::spawn_blocking,
+};
 use tokio_util::sync::CancellationToken;
 use urlencoding::decode;
 
@@ -24,7 +32,15 @@ use crate::{
     visual_effects::oscilloscope::ve_loop,
 };
 
-pub struct DecoderRendererSyncSignal();
+pub enum DecoderToRendererSyncSignal {
+    Sync,
+    EndOfStream(EndOfStreamSignal),
+}
+pub struct EndOfStreamSignal {
+    pub last_block: usize,
+}
+pub struct RendererToDecoderSsynSignal();
+
 pub struct DecorderToVeSyncSignal();
 pub struct VeToDecoderSyncSignal();
 
@@ -194,7 +210,7 @@ pub async fn play_executor(
     });
 
     for _ in 0..NUM_OF_BLOCK - 2 - BACK_ROOM {
-        renderer_to_decoder_sender.send(DecoderRendererSyncSignal());
+        renderer_to_decoder_sender.send(RendererToDecoderSsynSignal());
         //ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal());
     }
 
@@ -237,31 +253,37 @@ pub async fn play_executor(
             }
         });
 
-        'l1: loop {
-            match ve_control_signal_recv.recv().await {
-                Some(VeControlSignal::VeEnabled(VeControlSignalVeEnabled {
-                    ve_enabled_info,
-                    ve_to_ui_signal_sender,
-                    ui_to_ve_signal_recv,
-                })) => {
-                    _ = sender.send(VeEnabledInfoFromPlayerToVe {
-                        sample_rate: ve_enabled_info.sample_rate,
-                        renderer_read_exclusize: ve_enabled_info.ve_start_read_exclusize,
-                        decorder_to_ve_signal_recv: ve_enabled_info.decorder_to_ve_signal_recv,
-                        ve_to_decoder_signal_sender: ve_enabled_info.ve_to_decoder_signal_sender,
+        let event_block = async move {
+            'l1: loop {
+                match ve_control_signal_recv.recv().await {
+                    Some(VeControlSignal::VeEnabled(VeControlSignalVeEnabled {
+                        ve_enabled_info,
                         ve_to_ui_signal_sender,
                         ui_to_ve_signal_recv,
-                    })
-                }
-                Some(VeControlSignal::PlayStop) => break 'l1,
-                Some(VeControlSignal::VeDisabled) => {
-                    cancellation_token_for_disable_event_sender.cancel();
-                }
-                None => break 'l1,
-            };
-        }
+                    })) => {
+                        _ = sender.send(VeEnabledInfoFromPlayerToVe {
+                            sample_rate: ve_enabled_info.sample_rate,
+                            renderer_read_exclusize: ve_enabled_info.ve_start_read_exclusize,
+                            decorder_to_ve_signal_recv: ve_enabled_info.decorder_to_ve_signal_recv,
+                            ve_to_decoder_signal_sender: ve_enabled_info
+                                .ve_to_decoder_signal_sender,
+                            ve_to_ui_signal_sender,
+                            ui_to_ve_signal_recv,
+                        })
+                    }
+                    Some(VeControlSignal::PlayStop) => {
+                        cancellation_token_for_disable_event_sender.cancel();
+                        break 'l1;
+                    }
+                    Some(VeControlSignal::VeDisabled) => {
+                        cancellation_token_for_disable_event_sender.cancel();
+                    }
+                    None => break 'l1,
+                };
+            }
+        };
 
-        _ = handle.await;
+        _ = tokio::join!(handle, event_block);
     });
 
     let (renderer_control_signal_sender, renderer_control_signal_recv) = unbounded_channel();
@@ -359,7 +381,7 @@ pub async fn play_executor(
         }
     };
 
-    join!(
+    tokio::join!(
         player_control_signal_loop_task,
         player_notification_loop_task,
         renderer_handle,
@@ -371,8 +393,8 @@ pub async fn play_executor(
 fn append_decode_buffer(
     decoder_wrapper: &mut DecoderWrapper,
     shared_buffer: &mut SharedBuffer,
-    decoder_to_renderer_sender: UnboundedSender<DecoderRendererSyncSignal>,
-    mut renderer_to_decoder_singal_recv: UnboundedReceiver<DecoderRendererSyncSignal>,
+    decoder_to_renderer_sender: UnboundedSender<DecoderToRendererSyncSignal>,
+    mut renderer_to_decoder_singal_recv: UnboundedReceiver<RendererToDecoderSsynSignal>,
     // decoder_to_ve_signal_sender: UnboundedSender<DecorderToVeSyncSignal>,
     // mut ve_to_decoder_signal_recv: UnboundedReceiver<VeToDecoderSyncSignal>,
     mut decoder_control_signal: UnboundedReceiver<DecoderControlSignal>,
@@ -393,8 +415,9 @@ fn append_decode_buffer(
     };
 
     let mut singnal_to_thread =
-        |renderer_to_decoder_singal_recv: &mut UnboundedReceiver<DecoderRendererSyncSignal>,
-         ve_signal: &mut Option<VeSignal>| {
+        |renderer_to_decoder_singal_recv: &mut UnboundedReceiver<RendererToDecoderSsynSignal>,
+         ve_signal: &mut Option<VeSignal>,
+         send_signal: DecoderToRendererSyncSignal| {
             renderer_to_decoder_singal_recv.blocking_recv();
             if let Some(VeSignal {
                 ve_to_decoder_signal_recv,
@@ -404,7 +427,16 @@ fn append_decode_buffer(
                 ve_to_decoder_signal_recv.blocking_recv();
                 decoder_to_ve_signal_sender.send(DecorderToVeSyncSignal());
             }
-            decoder_to_renderer_sender.send(DecoderRendererSyncSignal())
+            decoder_to_renderer_sender.send(send_signal)
+        };
+    let mut singnal_to_thread_sync =
+        |renderer_to_decoder_singal_recv: &mut UnboundedReceiver<RendererToDecoderSsynSignal>,
+         ve_signal: &mut Option<VeSignal>| {
+            singnal_to_thread(
+                renderer_to_decoder_singal_recv,
+                ve_signal,
+                DecoderToRendererSyncSignal::Sync,
+            )
         };
 
     let mut write_exclusive: usize = 0;
@@ -422,7 +454,10 @@ fn append_decode_buffer(
         if !decoder_control_signal.is_empty() {
             match decoder_control_signal.blocking_recv() {
                 Some(DecoderControlSignal::Stop) => {
-                    _ = singnal_to_thread(&mut renderer_to_decoder_singal_recv, &mut ve_signal);
+                    _ = singnal_to_thread_sync(
+                        &mut renderer_to_decoder_singal_recv,
+                        &mut ve_signal,
+                    );
                     break 'l1;
                 }
                 Some(DecoderControlSignal::VeEnabled(VeEnabledSignalFromPlayerToDecoder {
@@ -433,7 +468,7 @@ fn append_decode_buffer(
                     sample_rate,
                 })) => {
                     let len = renderer_to_decoder_singal_recv.len();
-                    
+
                     let ve_start_read_exclusize = (write_exclusive + len + 1) % NUM_OF_BLOCK;
                     for _ in 0..len {
                         ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal());
@@ -507,7 +542,7 @@ fn append_decode_buffer(
                 Equal => {
                     fill_buff_within_block();
                     if let Err(_) =
-                        singnal_to_thread(&mut renderer_to_decoder_singal_recv, &mut ve_signal)
+                        singnal_to_thread_sync(&mut renderer_to_decoder_singal_recv, &mut ve_signal)
                     {
                         return DecodeLoopResult::Error;
                     }
@@ -539,7 +574,7 @@ fn append_decode_buffer(
                     });
 
                     if let Err(_) =
-                        singnal_to_thread(&mut renderer_to_decoder_singal_recv, &mut ve_signal)
+                        singnal_to_thread_sync(&mut renderer_to_decoder_singal_recv, &mut ve_signal)
                     {
                         return DecodeLoopResult::Error;
                     }
@@ -600,7 +635,13 @@ fn append_decode_buffer(
                     channel_data_ref[head..].fill(0f32);
                 }
 
-                singnal_to_thread(&mut renderer_to_decoder_singal_recv, &mut ve_signal);
+                _ = singnal_to_thread(
+                    &mut renderer_to_decoder_singal_recv,
+                    &mut ve_signal,
+                    DecoderToRendererSyncSignal::EndOfStream(EndOfStreamSignal {
+                        last_block: write_exclusive,
+                    }),
+                );
                 break 'l1;
             }
             DecodeResult::None => continue,

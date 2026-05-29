@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -18,14 +18,14 @@ mod app;
 mod cli;
 mod config;
 mod errors;
+mod event_handler;
 mod extensions;
 mod logging;
 mod manipulation;
 mod tui;
-mod widgets;
-mod visual_effects;
 mod utils;
-mod event_handler;
+mod visual_effects;
+mod widgets;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {

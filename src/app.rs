@@ -145,6 +145,9 @@ impl App {
         if let Some(ref mut sender) = self.app_state_container.player_control_singnal_sender {
             sender.send(PlayerControlSignal::Stop)?;
         }
+        
+        self.ve_channel = None;
+        
 
         init_auto_play_handle.await?;
 
