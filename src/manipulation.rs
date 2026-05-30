@@ -53,6 +53,7 @@ pub struct VeEnabledInfoFromDecoder {
     pub decorder_to_ve_signal_recv: UnboundedReceiver<DecorderToVeSyncSignal>,
     pub ve_to_decoder_signal_sender: UnboundedSender<VeToDecoderSyncSignal>,
     pub ve_buffer_duration_offset_sec: f64,
+    pub ve_shared_buffer: AtomicPtr<VESharedBuffer>,
 }
 
 pub struct VeEnabledInfoFromPlayerToVe {
@@ -63,6 +64,7 @@ pub struct VeEnabledInfoFromPlayerToVe {
 
     pub ve_to_ui_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
     pub ui_to_ve_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
+    pub ve_shared_buffer: AtomicPtr<VESharedBuffer>,
 }
 
 pub struct UiVEThreadSyncSignal();
@@ -80,7 +82,7 @@ pub enum PlayerControlSignal {
     Pause,
     Resume,
     Stop,
-    VeEnabled,
+    VeEnabled(AtomicPtr<VESharedBuffer>),
     VeDisabled,
 }
 pub enum DecoderControlSignal {
@@ -95,6 +97,7 @@ pub struct VeEnabledSignalFromPlayerToDecoder {
     pub decorder_to_ve_signal_recv: UnboundedReceiver<DecorderToVeSyncSignal>,
     pub ve_to_decoder_signal_sender: UnboundedSender<VeToDecoderSyncSignal>,
     pub ve_to_decoder_signal_recv: UnboundedReceiver<VeToDecoderSyncSignal>,
+    pub ve_shared_buffer: AtomicPtr<VESharedBuffer>,
 }
 
 pub enum VeControlSignal {
@@ -130,9 +133,6 @@ pub async fn play_executor(
     playback_file_path: &str,
     player_control_signal_recv: &mut UnboundedReceiver<PlayerControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
-    // ve_to_ui_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
-    // ui_to_ve_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
-    ve_shared_buffer: AtomicPtr<Option<VESharedBuffer>>,
 ) {
     let probe = get_probe();
     use std::fs::File;
@@ -183,9 +183,10 @@ pub async fn play_executor(
     let shared_buffer_for_renderer = AtomicPtr::new(&raw mut shared_buffer);
     let shared_buffer_for_ve = AtomicPtr::new(&raw mut shared_buffer);
 
-    let retrieve_ref = |atomic_ptr: AtomicPtr<SharedBuffer>| unsafe {
+    #[allow(unsafe_op_in_unsafe_fn)]
+    unsafe fn retrieve_ref<'a, T>(atomic_ptr: &AtomicPtr<T>) -> &'a mut T {
         atomic_ptr.load(Ordering::Acquire).as_mut().unwrap()
-    };
+    }
 
     let (decoder_control_signal_sender, decoder_control_signal_recv) = unbounded_channel();
     // let (decoder_to_ve_signal_sender, decoder_to_ve_signal_recv) = unbounded_channel();
@@ -196,7 +197,7 @@ pub async fn play_executor(
         mut decoder_to_player_notofication_signal_recv,
     ) = unbounded_channel();
     let decoder_handle = tokio::task::spawn_blocking(move || {
-        let shared_buffer = retrieve_ref(shared_buffer_for_decoder);
+        let shared_buffer = unsafe { retrieve_ref(&shared_buffer_for_decoder) };
         append_decode_buffer(
             &mut decoder_wrapper,
             shared_buffer,
@@ -217,9 +218,7 @@ pub async fn play_executor(
     let (ve_control_signal_sender, ve_control_signal_recv) = unbounded_channel();
 
     let visual_effect_handle = tokio::task::spawn(async move {
-        let shared_buffer = retrieve_ref(shared_buffer_for_ve);
-        let ve_shared_buffer =
-            unsafe { ve_shared_buffer.load(Ordering::Acquire).as_mut().unwrap() };
+        let shared_buffer = unsafe { retrieve_ref(&shared_buffer_for_ve) };
 
         // let ve_to_decoder_signal_sender = ve_to_decoder_signal_sender;
         // let mut decoder_to_ve_signal_recv = decoder_to_ve_signal_recv;
@@ -236,6 +235,7 @@ pub async fn play_executor(
             'l1: loop {
                 match recv.blocking_recv() {
                     Some(mut signal) => {
+                        let ve_shared_buffer = unsafe { retrieve_ref(&signal.ve_shared_buffer) };
                         ve_loop(
                             shared_buffer,
                             ve_shared_buffer,
@@ -269,6 +269,7 @@ pub async fn play_executor(
                                 .ve_to_decoder_signal_sender,
                             ve_to_ui_signal_sender,
                             ui_to_ve_signal_recv,
+                            ve_shared_buffer: ve_enabled_info.ve_shared_buffer,
                         })
                     }
                     Some(VeControlSignal::PlayStop) => {
@@ -290,7 +291,7 @@ pub async fn play_executor(
 
     let player_to_ui_singnal = player_to_ui_singnal_sender.clone();
     let renderer_handle = tokio::task::spawn_blocking(move || {
-        let shared_buffer = retrieve_ref(shared_buffer_for_renderer);
+        let shared_buffer = unsafe { retrieve_ref(&shared_buffer_for_renderer) };
 
         AudioOutput::main(
             shared_buffer,
@@ -325,7 +326,7 @@ pub async fn play_executor(
                     ve_control_signal_sender.send(VeControlSignal::PlayStop);
                     break 'l1;
                 }
-                PlayerControlSignal::VeEnabled => {
+                PlayerControlSignal::VeEnabled(ve_shared_buffer) => {
                     let (decoder_to_ve_signal_sender, decorder_to_ve_signal_recv) =
                         unbounded_channel();
                     let (ve_to_decoder_signal_sender, ve_to_decoder_signal_recv) =
@@ -336,6 +337,7 @@ pub async fn play_executor(
                         decorder_to_ve_signal_recv,
                         ve_to_decoder_signal_sender,
                         ve_to_decoder_signal_recv,
+                        ve_shared_buffer,
                     };
 
                     decoder_control_signal_sender
@@ -466,6 +468,7 @@ fn append_decode_buffer(
                     ve_to_decoder_signal_sender,
                     ve_to_decoder_signal_recv,
                     sample_rate,
+                    ve_shared_buffer,
                 })) => {
                     let len = renderer_to_decoder_singal_recv.len();
 
@@ -495,6 +498,7 @@ fn append_decode_buffer(
                             decorder_to_ve_signal_recv,
                             ve_to_decoder_signal_sender,
                             ve_buffer_duration_offset_sec,
+                            ve_shared_buffer,
                         }),
                     );
 

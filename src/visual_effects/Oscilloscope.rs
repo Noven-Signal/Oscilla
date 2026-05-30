@@ -10,11 +10,11 @@ use crate::{
     utils::array_init,
 };
 
-const FRAME_RATE: usize = 60;
+pub const FRAME_RATE: usize = 60;
 
 pub fn ve_loop(
     shared_buffer: &SharedBuffer,
-    ve_shared_buffer: &mut Option<VESharedBuffer>,
+    ve_shared_buffer: &mut VESharedBuffer,
     ve_to_decoder_signal_sender: UnboundedSender<VeToDecoderSyncSignal>,
     mut decoder_to_ve_recv: UnboundedReceiver<DecorderToVeSyncSignal>,
     ve_to_ui_signal_sender: &UnboundedSender<UiVEThreadSyncSignal>,
@@ -36,21 +36,8 @@ pub fn ve_loop(
     let mut write_exclusive: usize = 0;
     let mut count = 0;
 
-    let (ve_shared_buffer, move_window) = {
-        let move_window = sample_rate / FRAME_RATE;
-
-        *ve_shared_buffer = {
-            let crate_move_window_size_vec =
-                || (0..move_window).map(|i| (i as f64, 0f64)).collect();
-            let arr = array_init(|| array_init(|| OscilloscopeData(crate_move_window_size_vec())));
-            Some(arr)
-        };
-        let buffer_ref = ve_shared_buffer
-            .as_mut()
-            .expect("must be init above statement");
-
-        (buffer_ref, move_window)
-    };
+    let  move_window = sample_rate / FRAME_RATE;
+    
 
     let mut signal_to_decoder_thread = || {
         decoder_to_ve_recv.blocking_recv();

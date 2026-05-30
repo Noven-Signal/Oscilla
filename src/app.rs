@@ -104,11 +104,6 @@ impl App {
         app_state_container.player_control_singnal_sender = Some(player_control_signal_sender);
         let player_to_ui_singnal_sender = player_to_ui_signal_sender.clone();
 
-        let ve_shaerd_buffer_ptr = {
-            let buffer_ref = &mut self.app_state_container.ve_shared_buffer;
-            AtomicPtr::new(&raw mut *buffer_ref)
-        };
-
         tokio::spawn(async move {
             let Some(first_track) = play_list_arc.first() else {
                 return;
@@ -118,7 +113,6 @@ impl App {
                 first_track,
                 &mut player_control_signal_recv,
                 player_to_ui_singnal_sender,
-                ve_shaerd_buffer_ptr,
             )
             .await;
         })
@@ -145,9 +139,8 @@ impl App {
         if let Some(ref mut sender) = self.app_state_container.player_control_singnal_sender {
             sender.send(PlayerControlSignal::Stop)?;
         }
-        
+
         self.ve_channel = None;
-        
 
         init_auto_play_handle.await?;
 
@@ -261,9 +254,28 @@ impl App {
 
                 if let Some(sender) = &self.app_state_container.player_control_singnal_sender {
                     let sender = sender.clone();
+
+                    self.app_state_container.ve_shared_buffer = {
+                        let move_window = track_info.sample_rate as usize
+                            / crate::visual_effects::oscilloscope::FRAME_RATE;
+                        let crate_move_window_size_vec =
+                            || (0..move_window).map(|i| (i as f64, 0f64)).collect();
+                        let arr = array_init(|| {
+                            array_init(|| OscilloscopeData(crate_move_window_size_vec()))
+                        });
+                        Some(arr)
+                    };
+                    let ve_shared_buffer = self
+                        .app_state_container
+                        .ve_shared_buffer
+                        .as_mut()
+                        .expect("must be Some because init above line");
+
+                    let ptr = AtomicPtr::new(ve_shared_buffer);
+
                     tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(3)).await;
-                        sender.send(PlayerControlSignal::VeEnabled);
+                        tokio::time::sleep(Duration::from_secs(0)).await;
+                        sender.send(PlayerControlSignal::VeEnabled(ptr));
                     });
 
                     //sender.send(PlayerControlSignal::VeEnabled);
