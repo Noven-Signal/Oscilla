@@ -1,4 +1,5 @@
 pub mod AppState {
+    use std::ops::Index;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
 
@@ -6,9 +7,11 @@ pub mod AppState {
     use ratatui::widgets::ListState;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
+    use crate::AppState::AppState::VeSelectedTab::Oscilloscope;
     use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
+    use crate::widgets::EffectArea::EffectArea;
     use crate::widgets::ListArea::ListArea;
     use crate::widgets::VolArea::VolArea;
 
@@ -43,7 +46,7 @@ pub mod AppState {
         ($self: ident,$ident:ident) => {
             match $self {
                 Tabs::ListArea => handle_key_via_trait!(ListArea, $ident),
-                Tabs::EffectArea => todo!(),
+                Tabs::EffectArea => handle_key_via_trait!(EffectArea, $ident),
                 Tabs::DurationBarArea => todo!(),
                 Tabs::ButtonsArea => handle_key_via_trait!(ButtonsArea, $ident),
                 Tabs::VolArea => handle_key_via_trait!(VolArea, $ident),
@@ -165,7 +168,8 @@ pub mod AppState {
         pub fn set_played_duration(&mut self, add_frames: u32, buffered_frames: u32) {
             let add_duration = Duration::from_secs_f64(add_frames as f64 / self.sample_rate as f64);
 
-            self.current_played_duration = self.current_played_duration.saturating_add(add_duration);
+            self.current_played_duration =
+                self.current_played_duration.saturating_add(add_duration);
             self.audio_device_buffered_duration = Duration::from_secs_f64(
                 (buffered_frames + add_frames) as f64 / self.sample_rate as f64,
             );
@@ -188,6 +192,51 @@ pub mod AppState {
         }
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub enum VeSelectedTab {
+        Off,
+        Oscilloscope,
+    }
+
+    impl VeSelectedTab {
+        pub const fn enumate_case() -> [Self; 2] {
+            use VeSelectedTab::*;
+            [Off, Oscilloscope]
+        }
+        pub fn list_str() -> [String; 2] {
+            use VeSelectedTab::*;
+
+            [stringify!(Off).to_string(), stringify!(Oscilloscope).to_string()]
+        }
+        pub fn nameof(&self) -> String {
+            use VeSelectedTab::*;
+            match self {
+                Off => stringify!(Off),
+                Oscilloscope => stringify!(Oscilloscope),
+            }.to_string()
+        }
+
+        pub fn enumerate_arr_idnex(&self) -> usize{
+            Self::enumate_case().iter().position(|x| x == self).expect("bug")
+        }
+
+        pub fn get_focus_tab(&self, key_code: KeyCode) -> VeSelectedTab {
+            use VeSelectedTab::*;
+            let arr = Self::enumate_case();
+            let current_index = self.enumerate_arr_idnex();
+
+            let slide = match key_code {
+                KeyCode::Left => -1,
+                KeyCode::Right => 1,
+                _ => 0,
+            };
+
+            let target_index = (current_index as i32 + slide + arr.len() as i32) % arr.len() as i32;
+
+            arr[target_index as usize]
+        }
+    }
+
     //type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
     pub struct AppStateContainer {
         pub focus_state: TabState,
@@ -199,9 +248,8 @@ pub mod AppState {
         pub playing_track_info: Option<PlayingTrackInfo>,
         pub player_control_singnal_sender: Option<UnboundedSender<PlayerControlSignal>>,
         pub ve_shared_buffer: Option<VESharedBuffer>,
-        // pub ui_to_ve_signal_sender: Option<UnboundedSender<UiVEThreadSyncSignal>>,
-        // pub ve_to_ui_signal_recv: Option<UnboundedReceiver<UiVEThreadSyncSignal>>,
         pub ve_read_exclusive: usize,
+        pub ve_selected: VeSelectedTab,
     }
 
     impl AppStateContainer {
@@ -218,9 +266,8 @@ pub mod AppState {
                 player_control_singnal_sender: None,
                 playing_track_info: None,
                 ve_shared_buffer: None,
-                // ui_to_ve_signal_sender: None,
-                // ve_to_ui_signal_recv: None,
                 ve_read_exclusive: 0,
+                ve_selected: VeSelectedTab::Off,
             }
         }
     }

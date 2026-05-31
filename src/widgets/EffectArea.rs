@@ -5,14 +5,23 @@ use std::{
 
 use rand::RngReader;
 use ratatui::{
-    layout::{Constraint, Direction, Layout}, prelude::{Buffer, Rect}, style::{Color, Style, Styled, Stylize}, symbols::{self, Marker}, text::{Line, Span}, widgets::{Axis, Chart, Dataset, GraphType, StatefulWidget, Tabs, Widget}
+    layout::{Constraint, Direction, Layout},
+    prelude::{Buffer, Rect},
+    style::{Color, Style, Styled, Stylize},
+    symbols::{self, Marker},
+    text::{Line, Span},
+    widgets::{Axis, Chart, Dataset, GraphType, StatefulWidget, Tabs, Widget},
 };
 
 use crate::{
-    AppState::AppState::{AppStateContainer, PlayingTrackInfo, TabState},
-    app::TrackInfo,
+    AppState::AppState::{
+        AppStateContainer, AreaHandler, PlayingTrackInfo, TabState, VeSelectedTab,
+    },
+    app::{self, TrackInfo},
     extensions::Rect::RectExtension,
     get_decorated_border,
+    manipulation::{OscilloscopeData, PlayerControlSignal},
+    utils::array_init,
 };
 
 #[derive(Default)]
@@ -21,23 +30,32 @@ static mut count: i32 = 0;
 impl StatefulWidget for EffectArea {
     type State = AppStateContainer;
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let Some(ref ve_shared_buffer) = state.ve_shared_buffer else {
-            return;
-        };
-
         get_decorated_border!(
             state.focus_state,
             crate::AppState::AppState::Tabs::EffectArea
         )
         .render(area, buf);
-    
-        let tabs = Tabs::new(vec![Line::from("off").style(Color::White), "oscilloscope".into()])
+
+        let selected_idnex = state.ve_selected.enumerate_arr_idnex();
+        let list = VeSelectedTab::enumate_case().map(|x| {
+            if state.ve_selected == x {
+                x.nameof().into()
+            } else {
+                Line::from(x.nameof()).style(Color::White)
+            }
+        });
+        
+        let tabs = Tabs::new(list)
             .highlight_style(Style::default().magenta().on_black().bold())
-            .select(1)
+            .select(selected_idnex)
             .divider(Span::from("|").style(Color::White))
             .padding(" ", " ");
 
         tabs.render(area, buf);
+
+        let Some(ref ve_shared_buffer) = state.ve_shared_buffer else {
+            return;
+        };
 
         let [left_ch_area, right_ch_area] = area.margin(None).layout(
             &Layout::default()
@@ -90,6 +108,57 @@ impl StatefulWidget for EffectArea {
 
         for ele in info {
             render_channel_wave(ele);
+        }
+    }
+}
+
+impl AreaHandler for EffectArea {
+    fn handle_key(
+        app_state_container: &mut AppStateContainer,
+        key_code: crossterm::event::KeyCode,
+    ) {
+        let ve_selected = &mut app_state_container.ve_selected;
+        let target_tab = *&ve_selected.get_focus_tab(key_code);
+
+        if *ve_selected == target_tab{
+            return;
+        }
+        *ve_selected = target_tab;
+
+        match target_tab {
+            VeSelectedTab::Off => 'b1: {
+                let Some(sender) = &app_state_container.player_control_singnal_sender else {
+                    break 'b1;
+                };
+                sender.send(PlayerControlSignal::VeDisabled);
+            }
+            _ => {
+                let Some(sender) = &app_state_container.player_control_singnal_sender else {
+                    return;
+                };
+                let Some(playing_track_info) = &app_state_container.playing_track_info else {
+                    return;
+                };
+
+                app_state_container.ve_shared_buffer = {
+                    let move_window = playing_track_info.sample_rate as usize
+                        / crate::visual_effects::oscilloscope::FRAME_RATE;
+                    let crate_move_window_size_vec =
+                        || (0..move_window).map(|i| (i as f64, 0f64)).collect();
+                    let arr = array_init(|| {
+                        array_init(|| OscilloscopeData(crate_move_window_size_vec()))
+                    });
+                    Some(arr)
+                };
+                let ve_shared_buffer = app_state_container
+                    .ve_shared_buffer
+                    .as_mut()
+                    .expect("must be Some because init above line");
+
+                let ptr = AtomicPtr::new(ve_shared_buffer);
+
+                sender.send(PlayerControlSignal::VeEnabled(ptr));
+            }
         }
     }
 }

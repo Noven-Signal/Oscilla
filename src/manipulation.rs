@@ -65,6 +65,7 @@ pub struct VeEnabledInfoFromPlayerToVe {
     pub ve_to_ui_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
     pub ui_to_ve_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
     pub ve_shared_buffer: AtomicPtr<VESharedBuffer>,
+    pub cancellation_token: CancellationToken,
 }
 
 pub struct UiVEThreadSyncSignal();
@@ -217,17 +218,11 @@ pub async fn play_executor(
 
     let (ve_control_signal_sender, ve_control_signal_recv) = unbounded_channel();
 
+    let player_to_ui_singnal_sender_for_ve = player_to_ui_singnal_sender.clone();
     let visual_effect_handle = tokio::task::spawn(async move {
         let shared_buffer = unsafe { retrieve_ref(&shared_buffer_for_ve) };
 
-        // let ve_to_decoder_signal_sender = ve_to_decoder_signal_sender;
-        // let mut decoder_to_ve_signal_recv = decoder_to_ve_signal_recv;
-        // let ve_to_ui_signal_sender = ve_to_ui_signal_sender;
-        // let mut ui_to_ve_signal_recv = ui_to_ve_signal_recv;
         let mut ve_control_signal_recv = ve_control_signal_recv;
-
-        let cancellation_token = CancellationToken::new();
-        let cancellation_token_for_disable_event_sender = cancellation_token.clone();
 
         let (sender, mut recv) = unbounded_channel::<VeEnabledInfoFromPlayerToVe>();
 
@@ -243,10 +238,11 @@ pub async fn play_executor(
                             signal.decorder_to_ve_signal_recv,
                             &signal.ve_to_ui_signal_sender,
                             &mut signal.ui_to_ve_signal_recv,
-                            cancellation_token.clone(),
+                            signal.cancellation_token,
                             signal.sample_rate,
                             signal.renderer_read_exclusize,
                         );
+                        player_to_ui_singnal_sender_for_ve.send(PlayerToUISingnal::VeDisabled);
                     }
                     None => break 'l1,
                 }
@@ -254,6 +250,7 @@ pub async fn play_executor(
         });
 
         let event_block = async move {
+            let mut cancellation_token: Option<CancellationToken> = None;
             'l1: loop {
                 match ve_control_signal_recv.recv().await {
                     Some(VeControlSignal::VeEnabled(VeControlSignalVeEnabled {
@@ -261,6 +258,12 @@ pub async fn play_executor(
                         ve_to_ui_signal_sender,
                         ui_to_ve_signal_recv,
                     })) => {
+                        let cancellation_token = {
+                            let token = CancellationToken::new();
+                            cancellation_token = Some(token.clone());
+                            token
+                        };
+
                         _ = sender.send(VeEnabledInfoFromPlayerToVe {
                             sample_rate: ve_enabled_info.sample_rate,
                             renderer_read_exclusize: ve_enabled_info.ve_start_read_exclusize,
@@ -270,14 +273,19 @@ pub async fn play_executor(
                             ve_to_ui_signal_sender,
                             ui_to_ve_signal_recv,
                             ve_shared_buffer: ve_enabled_info.ve_shared_buffer,
+                            cancellation_token,
                         })
                     }
                     Some(VeControlSignal::PlayStop) => {
-                        cancellation_token_for_disable_event_sender.cancel();
+                        if let Some(token) = &cancellation_token {
+                            token.cancel();
+                        }
                         break 'l1;
                     }
                     Some(VeControlSignal::VeDisabled) => {
-                        cancellation_token_for_disable_event_sender.cancel();
+                        if let Some(token) = &cancellation_token {
+                            token.cancel();
+                        }
                     }
                     None => break 'l1,
                 };
