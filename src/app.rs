@@ -37,19 +37,19 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use windows::Win32::System::Com::IInternalUnknown;
 
-struct Ves {
+pub struct Ves {
     pub ui_to_ve_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
     pub ve_to_ui_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
     pub ve_buffer_duration_offset_sec: f64,
     pub interval: Interval,
     pub ve_frame_count: u32,
+    pub ve_read_exclusive: usize,
 }
 
 pub struct App {
     root_wiget: AppRoot,
     tui: Tui,
     app_state_container: AppStateContainer,
-    ve_channel: Option<Ves>,
     event_loop_canceled: bool,
 }
 
@@ -90,7 +90,6 @@ impl App {
             root_wiget: root_wiget,
             app_state_container: app_state_container,
             event_loop_canceled: false,
-            ve_channel: None,
         })
     }
 
@@ -121,10 +120,9 @@ impl App {
         })
     }
 
-    async fn ve_sync(app_state_container: &mut AppStateContainer) {
+    async fn ve_sync(ve_read_exclusive: &mut usize) {
         const NUM_OF_BLOCK_VE_LAST_INDEX: usize = NUM_OF_BLOCK_VE - 1;
-        let raed_exclusive = &mut app_state_container.ve_read_exclusive;
-        *raed_exclusive = match *raed_exclusive {
+        *ve_read_exclusive = match *ve_read_exclusive {
             NUM_OF_BLOCK_VE_LAST_INDEX => 0,
             x => x + 1,
         };
@@ -143,7 +141,7 @@ impl App {
             sender.send(PlayerControlSignal::Stop)?;
         }
 
-        self.ve_channel = None;
+        self.app_state_container.ve_channel = None;
 
         init_auto_play_handle.await?;
 
@@ -165,58 +163,55 @@ impl App {
 
             enum VeProcResult {
                 VeDisabled,
-                SyncRange(UnboundedSender<UiVEThreadSyncSignal>),
+                SyncRange,
                 VeIsTooForward,
             }
 
-            let mut ve_timing_awaiter = async |ves: &mut Option<Ves>| {
+            let ve_timing_awaiter = async |ves: &mut Option<Ves>| {
                 if let Some(Ves { interval, .. }) = ves {
                     interval.tick().await;
                 } else {
                     future::pending::<()>().await;
                 }
             };
-            let mut ve_proc = async |app_state_container: &mut AppStateContainer,
-                                     ves: &mut Ves|
-                   -> VeProcResult {
-                let Ves {
-                    ui_to_ve_signal_sender,
-                    ve_to_ui_signal_recv,
-                    ve_buffer_duration_offset_sec: init_offset,
-                    ve_frame_count,
-                    ..
-                } = ves;
+            let ve_proc =
+                async |ves: &mut Ves, track_info: &PlayingTrackInfo| -> VeProcResult {
+                    let Ves {
+                        ui_to_ve_signal_sender,
+                        ve_to_ui_signal_recv,
+                        ve_buffer_duration_offset_sec: init_offset,
+                        ve_frame_count,
+                        ve_read_exclusive,
+                        ..
+                    } = ves;
 
-                let Some(track_info) = &app_state_container.playing_track_info else {
-                    return VeProcResult::VeDisabled;
-                };
-                let carib_played_duration = track_info.get_carib_duration().as_secs_f64();
+                    let carib_played_duration = track_info.get_carib_duration().as_secs_f64();
 
-                let ve_position = (*ve_frame_count as f64 / 60f64) + *init_offset;
+                    let ve_position = (*ve_frame_count as f64 / 60f64) + *init_offset;
 
-                const n1_60_dobule: f64 = 2f64 / 60f64;
-                const m_n1_60_dobule: f64 = -n1_60_dobule;
-                match carib_played_duration - ve_position {
-                    ..=m_n1_60_dobule => VeProcResult::VeIsTooForward,
-                    m_n1_60_dobule..=n1_60_dobule => {
-                        ve_to_ui_signal_recv.recv().await;
-                        VeProcResult::SyncRange(ui_to_ve_signal_sender.clone())
-                    }
-                    diff => {
-                        let num_of_frame_forward = (diff / n1_60_dobule).abs().floor() as u32;
-                        for _ in 0..num_of_frame_forward - 1 {
-                            //dbg!(i);
+                    const N1_60_DOBULE: f64 = 2f64 / 60f64;
+                    const M_N1_60_DOBULE: f64 = -N1_60_DOBULE;
+                    match carib_played_duration - ve_position {
+                        ..=M_N1_60_DOBULE => VeProcResult::VeIsTooForward,
+                        M_N1_60_DOBULE..=N1_60_DOBULE => {
                             ve_to_ui_signal_recv.recv().await;
-
-                            Self::ve_sync(app_state_container).await;
-                            ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
-                            *ve_frame_count = *ve_frame_count + 1;
+                            VeProcResult::SyncRange
                         }
-                        ve_to_ui_signal_recv.recv().await;
-                        VeProcResult::SyncRange(ui_to_ve_signal_sender.clone())
+                        diff => {
+                            let num_of_frame_forward = (diff / N1_60_DOBULE).abs().floor() as u32;
+                            for _ in 0..num_of_frame_forward - 1 {
+                                //dbg!(i);
+                                ve_to_ui_signal_recv.recv().await;
+
+                                Self::ve_sync(ve_read_exclusive).await;
+                                ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
+                                *ve_frame_count = *ve_frame_count + 1;
+                            }
+                            ve_to_ui_signal_recv.recv().await;
+                            VeProcResult::SyncRange
+                        }
                     }
-                }
-            };
+                };
             tokio::select! {
                 signal = player_to_ui_singnal_receiver.recv() => {
                     match signal{
@@ -228,17 +223,21 @@ impl App {
                     Some(Result::Ok(event)) => self.handle_crossterm_event(&event).await?,
                     _ => break 'l1,
                 },
-                _ = ve_timing_awaiter(&mut self.ve_channel) =>'b1: {
-                    let Some(ref mut  ves) = self.ve_channel else {break 'b1;};
-                    let proc_res = ve_proc(&mut self.app_state_container, ves).await;
-                    let VeProcResult::SyncRange(ui_to_ve_signal_sender) = proc_res else { break 'b1;};
-
+                _ = ve_timing_awaiter(&mut self.app_state_container.ve_channel) =>'b1: {
+                    {
+                        let AppStateContainer{ve_channel: Some(ref mut ves), playing_track_info: Some(ref playing_track_info),..} = self.app_state_container else {break 'b1;};
+                        let proc_res = ve_proc(ves, playing_track_info).await;
+                        let VeProcResult::SyncRange = proc_res else { break 'b1;};
+                    }
                     _ = self.render();
-                    Self::ve_sync(&mut self.app_state_container).await;
+                    {
+                        let AppStateContainer{ve_channel: Some(ref mut ves),..} = self.app_state_container else {break 'b1;};
+                        Self::ve_sync(&mut ves.ve_read_exclusive).await;
 
-                    ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
-                    if let Some(Ves { ref mut ve_frame_count,.. }) = self.ve_channel{
-                        *ve_frame_count = *ve_frame_count + 1;
+                        ves.ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
+                        if let Some(Ves { ref mut ve_frame_count,.. }) = self.app_state_container.ve_channel{
+                            *ve_frame_count = *ve_frame_count + 1;
+                        }
                     }
                 },
             };
@@ -279,18 +278,18 @@ impl App {
                 ve_to_ui_signal_recv,
                 ve_buffer_duration_offset_sec,
             }) => {
-                self.app_state_container.ve_read_exclusive = 0;
-                self.ve_channel = Some(Ves {
+                self.app_state_container.ve_channel = Some(Ves {
                     ui_to_ve_signal_sender,
                     ve_to_ui_signal_recv,
                     ve_buffer_duration_offset_sec,
                     interval: tokio::time::interval(Duration::from_secs_f64(1f64 / 60f64)),
                     ve_frame_count: 0,
+                    ve_read_exclusive: 0,
                 })
             }
             PlayerToUISingnal::VeDisabled => {
                 self.app_state_container.ve_shared_buffer = None;
-                self.ve_channel = None;
+                self.app_state_container.ve_channel = None;
             }
         }
         Ok(())

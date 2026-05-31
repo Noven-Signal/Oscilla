@@ -5,10 +5,11 @@ pub mod AppState {
 
     use crossterm::event::KeyCode;
     use ratatui::widgets::ListState;
-    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
     use crate::AppState::AppState::VeSelectedTab::Oscilloscope;
-    use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
+    use crate::app::Ves;
+use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
     use crate::widgets::EffectArea::EffectArea;
@@ -248,14 +249,13 @@ pub mod AppState {
         pub playing_track_info: Option<PlayingTrackInfo>,
         pub player_control_singnal_sender: Option<UnboundedSender<PlayerControlSignal>>,
         pub ve_shared_buffer: Option<VESharedBuffer>,
-        pub ve_read_exclusive: usize,
         pub ve_selected: VeSelectedTab,
+        pub ve_channel: Option<Ves>,
+        
     }
 
     impl AppStateContainer {
         pub fn new(list: Vec<String>) -> Self {
-            //          type OLM<T> = OnceLock<Mutex<T>>;
-            // type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
             Self {
                 focus_state: TabState::None,
                 button_focus_state: ButtonIdent::PlayOrPause(PlayButtonState::Playing),
@@ -266,8 +266,8 @@ pub mod AppState {
                 player_control_singnal_sender: None,
                 playing_track_info: None,
                 ve_shared_buffer: None,
-                ve_read_exclusive: 0,
                 ve_selected: VeSelectedTab::Off,
+                ve_channel: None
             }
         }
     }

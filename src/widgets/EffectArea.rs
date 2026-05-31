@@ -17,7 +17,7 @@ use crate::{
     AppState::AppState::{
         AppStateContainer, AreaHandler, PlayingTrackInfo, TabState, VeSelectedTab,
     },
-    app::{self, TrackInfo},
+    app::{self, TrackInfo, Ves},
     extensions::Rect::RectExtension,
     get_decorated_border,
     manipulation::{OscilloscopeData, PlayerControlSignal},
@@ -44,7 +44,7 @@ impl StatefulWidget for EffectArea {
                 Line::from(x.nameof()).style(Color::White)
             }
         });
-        
+
         let tabs = Tabs::new(list)
             .highlight_style(Style::default().magenta().on_black().bold())
             .select(selected_idnex)
@@ -71,6 +71,13 @@ impl StatefulWidget for EffectArea {
             return;
         };
 
+        let Some(Ves {
+            ve_read_exclusive, ..
+        }) = state.ve_channel
+        else {
+            return;
+        };
+
         struct RenderChannelInfo<'a> {
             pub area: Rect,
             pub data: &'a [(f64, f64)],
@@ -93,7 +100,7 @@ impl StatefulWidget for EffectArea {
 
         let info = {
             let get_data_wave_data_slice =
-                |i: usize| ve_shared_buffer[state.ve_read_exclusive][i].0.as_slice();
+                |i: usize| ve_shared_buffer[ve_read_exclusive][i].0.as_slice();
             [
                 RenderChannelInfo {
                     area: left_ch_area,
@@ -120,7 +127,7 @@ impl AreaHandler for EffectArea {
         let ve_selected = &mut app_state_container.ve_selected;
         let target_tab = *&ve_selected.get_focus_tab(key_code);
 
-        if *ve_selected == target_tab{
+        if *ve_selected == target_tab {
             return;
         }
         *ve_selected = target_tab;
@@ -130,6 +137,9 @@ impl AreaHandler for EffectArea {
                 let Some(sender) = &app_state_container.player_control_singnal_sender else {
                     break 'b1;
                 };
+                if let None = app_state_container.ve_channel{
+                    return;
+                }
                 sender.send(PlayerControlSignal::VeDisabled);
             }
             _ => {
@@ -139,6 +149,10 @@ impl AreaHandler for EffectArea {
                 let Some(playing_track_info) = &app_state_container.playing_track_info else {
                     return;
                 };
+
+                if let Some(_) = app_state_container.ve_channel{
+                    return;
+                }
 
                 app_state_container.ve_shared_buffer = {
                     let move_window = playing_track_info.sample_rate as usize
