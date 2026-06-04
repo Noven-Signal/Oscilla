@@ -9,7 +9,7 @@ pub mod AppState {
 
     use crate::AppState::AppState::VeSelectedTab::Oscilloscope;
     use crate::app::Ves;
-use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
+    use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
     use crate::widgets::EffectArea::EffectArea;
@@ -193,7 +193,7 @@ use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuf
         }
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     pub enum VeSelectedTab {
         Off,
         Oscilloscope,
@@ -207,18 +207,25 @@ use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuf
         pub fn list_str() -> [String; 2] {
             use VeSelectedTab::*;
 
-            [stringify!(Off).to_string(), stringify!(Oscilloscope).to_string()]
+            [
+                stringify!(Off).to_string(),
+                stringify!(Oscilloscope).to_string(),
+            ]
         }
         pub fn nameof(&self) -> String {
             use VeSelectedTab::*;
             match self {
                 Off => stringify!(Off),
                 Oscilloscope => stringify!(Oscilloscope),
-            }.to_string()
+            }
+            .to_string()
         }
 
-        pub fn enumerate_arr_idnex(&self) -> usize{
-            Self::enumate_case().iter().position(|x| x == self).expect("bug")
+        pub fn enumerate_arr_idnex(&self) -> usize {
+            Self::enumate_case()
+                .iter()
+                .position(|x| x == self)
+                .expect("bug")
         }
 
         pub fn get_focus_tab(&self, key_code: KeyCode) -> VeSelectedTab {
@@ -238,6 +245,11 @@ use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuf
         }
     }
 
+    #[derive(Clone, Copy)]
+    pub struct VeSwitcherReeustSignal {
+        pub requestTab: VeSelectedTab,
+    }
+
     //type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
     pub struct AppStateContainer {
         pub focus_state: TabState,
@@ -251,11 +263,14 @@ use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuf
         pub ve_shared_buffer: Option<VESharedBuffer>,
         pub ve_selected: VeSelectedTab,
         pub ve_channel: Option<Ves>,
-        
+        pub ve_switcher_request_signal_sender: UnboundedSender<VeSwitcherReeustSignal>,
+        pub ve_switcher_request_signal_recv: UnboundedReceiver<VeSwitcherReeustSignal>,
     }
 
     impl AppStateContainer {
         pub fn new(list: Vec<String>) -> Self {
+            let (ve_switcher_request_signal_sender, ve_switcher_request_signal_recv) =
+                unbounded_channel();
             Self {
                 focus_state: TabState::None,
                 button_focus_state: ButtonIdent::PlayOrPause(PlayButtonState::Playing),
@@ -267,7 +282,9 @@ use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuf
                 playing_track_info: None,
                 ve_shared_buffer: None,
                 ve_selected: VeSelectedTab::Off,
-                ve_channel: None
+                ve_channel: None,
+                ve_switcher_request_signal_sender,
+                ve_switcher_request_signal_recv,
             }
         }
     }

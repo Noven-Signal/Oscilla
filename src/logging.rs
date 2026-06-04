@@ -1,3 +1,6 @@
+use std::{env, path::Path};
+
+use color_eyre::eyre::Ok;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
@@ -9,8 +12,11 @@ lazy_static::lazy_static! {
 }
 
 pub fn init() -> color_eyre::Result<()> {
-    let directory = config::get_data_dir();
-    std::fs::create_dir_all(directory.clone())?;
+    let Result::Ok(directory) = env::var("log_dir") else {
+        return Result::Ok(());
+    };
+    let directory = Path::new(&directory);
+    std::fs::create_dir_all(directory)?;
     let log_path = directory.join(LOG_FILE.clone());
     let log_file = std::fs::File::create(log_path)?;
     let env_filter = EnvFilter::builder().with_default_directive(tracing::Level::INFO.into());

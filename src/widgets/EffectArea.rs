@@ -15,9 +15,9 @@ use ratatui::{
 
 use crate::{
     AppState::AppState::{
-        AppStateContainer, AreaHandler, PlayingTrackInfo, TabState, VeSelectedTab,
+        AppStateContainer, AreaHandler, PlayingTrackInfo, TabState, VeSelectedTab, VeSwitcherReeustSignal,
     },
-    app::{self, TrackInfo, Ves},
+    app::{self, TrackInfo, VeSwitcherSyncSignal, Ves},
     extensions::Rect::RectExtension,
     get_decorated_border,
     manipulation::{OscilloscopeData, PlayerControlSignal},
@@ -132,47 +132,6 @@ impl AreaHandler for EffectArea {
         }
         *ve_selected = target_tab;
 
-        match target_tab {
-            VeSelectedTab::Off => 'b1: {
-                let Some(sender) = &app_state_container.player_control_singnal_sender else {
-                    break 'b1;
-                };
-                if let None = app_state_container.ve_channel{
-                    return;
-                }
-                sender.send(PlayerControlSignal::VeDisabled);
-            }
-            _ => {
-                let Some(sender) = &app_state_container.player_control_singnal_sender else {
-                    return;
-                };
-                let Some(playing_track_info) = &app_state_container.playing_track_info else {
-                    return;
-                };
-
-                if let Some(_) = app_state_container.ve_channel{
-                    return;
-                }
-
-                app_state_container.ve_shared_buffer = {
-                    let move_window = playing_track_info.sample_rate as usize
-                        / crate::visual_effects::oscilloscope::FRAME_RATE;
-                    let crate_move_window_size_vec =
-                        || (0..move_window).map(|i| (i as f64, 0f64)).collect();
-                    let arr = array_init(|| {
-                        array_init(|| OscilloscopeData(crate_move_window_size_vec()))
-                    });
-                    Some(arr)
-                };
-                let ve_shared_buffer = app_state_container
-                    .ve_shared_buffer
-                    .as_mut()
-                    .expect("must be Some because init above line");
-
-                let ptr = AtomicPtr::new(ve_shared_buffer);
-
-                sender.send(PlayerControlSignal::VeEnabled(ptr));
-            }
-        }
+        app_state_container.ve_switcher_request_signal_sender.send(VeSwitcherReeustSignal{ requestTab: target_tab});
     }
 }

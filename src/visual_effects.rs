@@ -1,1 +1,1 @@
-pub mod oscilloscope;
+pub mod Oscilloscope;

@@ -1,13 +1,8 @@
 use std::{
-    cmp,
-    fmt::Debug,
-    panic,
-    path::Path,
-    sync::{
+    cmp, fmt::Debug, ops::{Add, AddAssign}, panic, path::Path, sync::{
         Arc,
         atomic::{AtomicPtr, Ordering},
-    },
-    time::Duration,
+    }, time::Duration
 };
 
 use futures::{future::join, join};
@@ -21,6 +16,7 @@ use tokio::{
     task::spawn_blocking,
 };
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 use urlencoding::decode;
 
 use crate::{
@@ -29,7 +25,7 @@ use crate::{
     DecoderWrapper::{DecodeResult, DecoderWrapper},
     app::{PlayedFrames, PlayerToUISingnal, PlayerToUISingnalVeEnabled, TrackInfo},
     utils::array_init,
-    visual_effects::oscilloscope::ve_loop,
+    visual_effects::Oscilloscope::ve_loop,
 };
 
 pub enum DecoderToRendererSyncSignal {
@@ -44,8 +40,9 @@ pub struct RendererToDecoderSsynSignal();
 pub struct DecorderToVeSyncSignal();
 pub struct VeToDecoderSyncSignal();
 
-pub enum DecoderToPlayerNotification {
+pub enum WorkerToPlayerNotification {
     VeEnabledInfo(VeEnabledInfoFromDecoder),
+    VeDisabledSync,
 }
 pub struct VeEnabledInfoFromDecoder {
     pub sample_rate: usize,
@@ -194,9 +191,11 @@ pub async fn play_executor(
 
     // let (ve_to_decoder_signal_sender, ve_to_decoder_signal_recv) = unbounded_channel();
     let (
-        decoder_to_player_notofication_signal_sender,
-        mut decoder_to_player_notofication_signal_recv,
+        worker_to_player_notofication_signal_sender,
+        mut worker_to_player_notofication_signal_recv,
     ) = unbounded_channel();
+    let worker_to_player_notofication_signal_sender_for_ve =
+        worker_to_player_notofication_signal_sender.clone();
     let decoder_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = unsafe { retrieve_ref(&shared_buffer_for_decoder) };
         append_decode_buffer(
@@ -207,7 +206,7 @@ pub async fn play_executor(
             // decoder_to_ve_signal_sender,
             // ve_to_decoder_signal_recv,
             decoder_control_signal_recv,
-            decoder_to_player_notofication_signal_sender,
+            worker_to_player_notofication_signal_sender,
         );
     });
 
@@ -227,10 +226,14 @@ pub async fn play_executor(
         let (sender, mut recv) = unbounded_channel::<VeEnabledInfoFromPlayerToVe>();
 
         let handle = tokio::task::spawn_blocking(move || {
+            let mut disable_call_count_ve = 0;
             'l1: loop {
                 match recv.blocking_recv() {
                     Some(mut signal) => {
                         let ve_shared_buffer = unsafe { retrieve_ref(&signal.ve_shared_buffer) };
+
+                        player_to_ui_singnal_sender_for_ve.send(PlayerToUISingnal::VeEnabledSync);
+
                         ve_loop(
                             shared_buffer,
                             ve_shared_buffer,
@@ -242,7 +245,12 @@ pub async fn play_executor(
                             signal.sample_rate,
                             signal.renderer_read_exclusize,
                         );
-                        player_to_ui_singnal_sender_for_ve.send(PlayerToUISingnal::VeDisabled);
+                        worker_to_player_notofication_signal_sender_for_ve
+                            .send(WorkerToPlayerNotification::VeDisabledSync);
+                        disable_call_count_ve.add_assign(1);
+                        info!("disable_call_count_ve: {disable_call_count_ve}");
+
+                        //player_to_ui_singnal_sender_for_ve.send(PlayerToUISingnal::VeDisabled);
                     }
                     None => break 'l1,
                 }
@@ -360,9 +368,10 @@ pub async fn play_executor(
     };
 
     let player_notification_loop_task = async {
+        let mut disabled_count = 0;
         'l2: loop {
-            match decoder_to_player_notofication_signal_recv.recv().await {
-                Some(DecoderToPlayerNotification::VeEnabledInfo(ve_enabled_info)) => {
+            match worker_to_player_notofication_signal_recv.recv().await {
+                Some(WorkerToPlayerNotification::VeEnabledInfo(ve_enabled_info)) => {
                     let (ve_to_ui_signal_sender, ve_to_ui_signal_recv) = unbounded_channel();
                     let (ui_to_ve_signal_sender, ui_to_ve_signal_recv) = unbounded_channel();
 
@@ -386,6 +395,16 @@ pub async fn play_executor(
                         },
                     ));
                 }
+                Some(WorkerToPlayerNotification::VeDisabledSync) => match disabled_count {
+                    0 => {
+                        disabled_count = disabled_count + 1;
+                    }
+                    1 => {
+                        _ = player_to_ui_singnal_sender.send(PlayerToUISingnal::VeDisabled);
+                        disabled_count = 0;
+                    }
+                    _ => panic!(),
+                },
                 None => break 'l2,
             };
         }
@@ -408,7 +427,7 @@ fn append_decode_buffer(
     // decoder_to_ve_signal_sender: UnboundedSender<DecorderToVeSyncSignal>,
     // mut ve_to_decoder_signal_recv: UnboundedReceiver<VeToDecoderSyncSignal>,
     mut decoder_control_signal: UnboundedReceiver<DecoderControlSignal>,
-    mut decoder_to_player_notification_signal: UnboundedSender<DecoderToPlayerNotification>,
+    mut decoder_to_player_notification_signal: UnboundedSender<WorkerToPlayerNotification>,
 ) {
     struct VeSignal {
         pub decoder_to_ve_signal_sender: UnboundedSender<DecorderToVeSyncSignal>,
@@ -455,6 +474,7 @@ fn append_decode_buffer(
     let mut type_conversion_buff: [Vec<f32>; CHANNEL] = array_init(|| vec![0f32; BLOCK_SIZE]);
     let mut block_count: usize = 0;
     // let mut ve_enabled = false;
+    let mut disable_call_couunt_decoder = 0;
 
     let Some(file_sample_rate) = decoder_wrapper.get_sample_rate() else {
         return;
@@ -500,7 +520,7 @@ fn append_decode_buffer(
                     };
 
                     decoder_to_player_notification_signal.send(
-                        DecoderToPlayerNotification::VeEnabledInfo(VeEnabledInfoFromDecoder {
+                        WorkerToPlayerNotification::VeEnabledInfo(VeEnabledInfoFromDecoder {
                             sample_rate,
                             ve_start_read_exclusize,
                             decorder_to_ve_signal_recv,
@@ -517,6 +537,11 @@ fn append_decode_buffer(
                 }
                 Some(DecoderControlSignal::VeDisabled) => {
                     ve_signal = None;
+
+                    _ = decoder_to_player_notification_signal
+                        .send(WorkerToPlayerNotification::VeDisabledSync);
+                    disable_call_couunt_decoder.add_assign(1);
+                        info!("disable_call_couunt_decoder: {disable_call_couunt_decoder}");
                 }
                 None => break 'l1,
             }
