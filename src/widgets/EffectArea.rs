@@ -64,7 +64,7 @@ impl StatefulWidget for EffectArea {
         );
 
         let AppStateContainer {
-            playing_track_info: Some(PlayingTrackInfo { sample_rate, .. }),
+            playing_track_info: Some(PlayingTrackInfo { audio_device_sample_rate: sample_rate, .. }),
             ..
         } = state
         else {

@@ -16,7 +16,7 @@ use crate::{
     app,
     // event_handler::{EventHandler, EventHndlerToAppSignal},
     manipulation::{
-        self, BLOCK_SIZE, DecoderControlSignal::VeDisabled, NUM_OF_BLOCK_VE, OscilloscopeData,
+        self, AudioDeviceInfo, DecoderControlSignal::VeDisabled, NUM_OF_BLOCK_VE, OscilloscopeData,
         PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer,
     },
     tui::Tui,
@@ -69,7 +69,8 @@ pub enum Mode {
 }
 
 pub struct TrackInfo {
-    pub sample_rate: u32,
+    pub file_sample_rate: usize,
+    pub audio_device_sample_rate: usize,
     pub track_duration: Duration,
 }
 pub struct PlayedFrames {
@@ -171,7 +172,7 @@ impl App {
     ) -> color_eyre::Result<()> {
         let mut event_stream = EventStream::new();
 
-        let mut ve_switcher_reeust_signal: Option<VeSwitcherReeustSignal> = None;
+        let mut ve_switcher_requst_signal: Option<VeSwitcherReeustSignal> = None;
         let mut ve_switcher_sync_signal: Option<VeSwitcherSyncSignal> = None;
 
         'l1: loop {
@@ -185,13 +186,6 @@ impl App {
                 VeIsTooForward,
             }
 
-            let ve_timing_awaiter = async |ves: &mut Option<Ves>| {
-                if let Some(Ves { interval, .. }) = ves {
-                    interval.tick().await;
-                } else {
-                    future::pending::<()>().await;
-                }
-            };
             let ve_proc = async |ves: &mut Ves, track_info: &PlayingTrackInfo| -> VeProcResult {
                 let Ves {
                     ui_to_ve_signal_sender,
@@ -241,7 +235,16 @@ impl App {
                     Some(Result::Ok(event)) => self.handle_crossterm_event(&event).await?,
                     _ => break 'l1,
                 },
-                _ = ve_timing_awaiter(&mut self.app_state_container.ve_channel) =>'b1: {
+                _ = async{
+                    let PlayState::Playing(_) = &self.app_state_container.play_state else{
+                        return future::pending::<()>().await;
+                    };
+                    if let Some(Ves { interval, .. }) = &mut self.app_state_container.ve_channel {
+                    interval.tick().await;
+                    } else {
+                        future::pending::<()>().await;
+                    }
+                } =>'b1: {
                     {
                         let AppStateContainer{ve_channel: Some(ref mut ves), playing_track_info: Some(ref playing_track_info),..} = self.app_state_container else {break 'b1;};
                         let proc_res = ve_proc(ves, playing_track_info).await;
@@ -257,14 +260,14 @@ impl App {
                     }
                 },
                 signal = async {
-                    match ve_switcher_reeust_signal{
+                    match ve_switcher_requst_signal{
                         Some(_) =>  future::pending().await,
                         None =>  self.app_state_container.ve_switcher_request_signal_recv.recv().await,
                     }
                 } => {
                     match signal{
                         Some(signal) => {
-                        ve_switcher_reeust_signal = Some(signal);
+                        ve_switcher_requst_signal = Some(signal);
                         },
                         None => {},
                     }
@@ -285,10 +288,10 @@ impl App {
             };
 
             if let (Some(ref signal), Some(_)) =
-                (ve_switcher_reeust_signal, ve_switcher_sync_signal)
+                (ve_switcher_requst_signal, ve_switcher_sync_signal)
             {
                 self.handle_ve_switching(signal.requestTab)?;
-                ve_switcher_reeust_signal = None;
+                ve_switcher_requst_signal = None;
                 ve_switcher_sync_signal = None;
             }
         }
@@ -310,7 +313,7 @@ impl App {
                     return Ok(());
                 };
                 app_state_container.ve_shared_buffer = {
-                    let move_window = playing_track_info.sample_rate as usize
+                    let move_window = playing_track_info.audio_device_sample_rate as usize
                         / crate::visual_effects::Oscilloscope::FRAME_RATE;
                     let crate_move_window_size_vec =
                         || (0..move_window).map(|i| (i as f64, 0f64)).collect();
@@ -337,7 +340,8 @@ impl App {
         match signal {
             PlayerToUISingnal::NoticeTrackInfo(track_info) => {
                 *playing_tarck_info = Some(PlayingTrackInfo::new(
-                    track_info.sample_rate,
+                    track_info.file_sample_rate,
+                    track_info.audio_device_sample_rate,
                     track_info.track_duration,
                 ));
 

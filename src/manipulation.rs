@@ -1,4 +1,5 @@
 use std::{
+    convert::TryFrom,
     fmt::Debug,
     ops::AddAssign,
     panic,
@@ -16,7 +17,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    AudioDecoder::decode_loop, AudioOutput, DecoderWrapper::DecoderWrapper, app::{PlayerToUISingnal, PlayerToUISingnalVeEnabled, TrackInfo}, utils::array_init, visual_effects::Oscilloscope::ve_loop
+    AudioDecoder::decode_loop,
+    AudioOutput,
+    DecoderWrapper::DecoderWrapper,
+    app::{PlayerToUISingnal, PlayerToUISingnalVeEnabled, TrackInfo},
+    utils::array_init,
+    visual_effects::Oscilloscope::ve_loop,
 };
 
 pub enum DecoderToRendererSyncSignal {
@@ -31,12 +37,49 @@ pub struct RendererToDecoderSsynSignal();
 pub struct DecorderToVeSyncSignal();
 pub struct VeToDecoderSyncSignal();
 
+pub struct AudioDeviceInfo {
+    pub sample_rate: usize,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum SampleRate {
+    R44100 = 44100,
+    R88200 = 88200,
+    R176400 = 176400,
+    R48000 = 48000,
+    R96000 = 96000,
+    R192000 = 192000,
+}
+
+impl TryFrom<usize> for SampleRate {
+    type Error = usize;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        use SampleRate::*;
+        match value {
+            44100 => Ok(R44100),
+            88200 => Ok(R88200),
+            176400 => Ok(R176400),
+            48000 => Ok(R48000),
+            96000 => Ok(R96000),
+            192000 => Ok(R192000),
+            other => Err(other),
+        }
+    }
+}
+impl SampleRate {
+    fn rawValue(&self) -> usize {
+        *self as usize
+    }
+}
+
 pub enum WorkerToPlayerNotification {
     VeEnabledInfo(VeEnabledInfoFromDecoder),
     VeDisabledSync,
+    NoticeAudioDeviceInfo(AudioDeviceInfo),
 }
 pub struct VeEnabledInfoFromDecoder {
-    pub sample_rate: usize,
+    pub audio_device_sample_rate: usize,
     pub ve_start_read_exclusize: usize,
     pub decorder_to_ve_signal_recv: UnboundedReceiver<DecorderToVeSyncSignal>,
     pub ve_to_decoder_signal_sender: UnboundedSender<VeToDecoderSyncSignal>,
@@ -81,7 +124,6 @@ pub enum DecoderControlSignal {
 }
 
 pub struct VeEnabledSignalFromPlayerToDecoder {
-    pub sample_rate: usize,
     pub decoder_to_ve_signal_sender: UnboundedSender<DecorderToVeSyncSignal>,
     pub decorder_to_ve_signal_recv: UnboundedReceiver<DecorderToVeSyncSignal>,
     pub ve_to_decoder_signal_sender: UnboundedSender<VeToDecoderSyncSignal>,
@@ -100,13 +142,21 @@ pub struct VeControlSignalVeEnabled {
     pub ui_to_ve_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
 }
 
+struct DecoderInitSignal {
+    renderer_sample_rate: usize,
+}
+
+pub struct RendererInitSignal {
+    pub block_size: usize,
+}
+
 pub type SharedBuffer = [[Vec<f32>; CHANNEL]; NUM_OF_BLOCK];
 
 #[derive(Debug)]
 pub struct OscilloscopeData(pub Vec<(f64, f64)>);
 pub type VESharedBuffer = [[OscilloscopeData; CHANNEL]; NUM_OF_BLOCK_VE];
 
-pub const BLOCK_SIZE: usize = 16 * 1024;
+pub const BLOCK_SIZE: usize = 147 * 160 * 4;
 pub const CHANNEL: usize = 2;
 pub const NUM_OF_BLOCK: usize = 16;
 pub const BACK_ROOM: usize = 4;
@@ -146,17 +196,16 @@ pub async fn play_executor(
         Err(_) => todo!(),
     };
 
-    let Some(sample_rate) = decoder_wrapper.get_sample_rate() else {
-        return;
+    let file_sample_rate = {
+        let Some(file_sample_rate) = decoder_wrapper.get_sample_rate() else {
+            return;
+        };
+        file_sample_rate as usize
     };
 
-    if let Some(track_duration) = decoder_wrapper.get_duration() {
-        let track_info = TrackInfo {
-            sample_rate,
-            track_duration,
-        };
-        player_to_ui_singnal_sender.send(PlayerToUISingnal::NoticeTrackInfo(track_info));
-    }
+    let Some(track_duration) = decoder_wrapper.get_duration() else {
+        return;
+    };
 
     let (renderer_to_decoder_sender, renderer_to_docoder_reciever) = mpsc::unbounded_channel();
     let (decoder_to_renderer_sender, decoder_to_renderer_reciever) = mpsc::unbounded_channel();
@@ -173,24 +222,35 @@ pub async fn play_executor(
     }
 
     let (decoder_control_signal_sender, decoder_control_signal_recv) = unbounded_channel();
-    // let (decoder_to_ve_signal_sender, decoder_to_ve_signal_recv) = unbounded_channel();
 
-    // let (ve_to_decoder_signal_sender, ve_to_decoder_signal_recv) = unbounded_channel();
     let (
         worker_to_player_notofication_signal_sender,
         mut worker_to_player_notofication_signal_recv,
     ) = unbounded_channel();
+    let worker_to_player_notofication_signal_sender_for_renderer =
+        worker_to_player_notofication_signal_sender.clone();
+
+    let (decoder_init_signal_sender, mut decoder_init_signal_recv) =
+        unbounded_channel::<DecoderInitSignal>();
+
     let worker_to_player_notofication_signal_sender_for_ve =
         worker_to_player_notofication_signal_sender.clone();
     let decoder_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = unsafe { retrieve_ref(&shared_buffer_for_decoder) };
+
+        let Some(DecoderInitSignal {
+            renderer_sample_rate,
+        }) = decoder_init_signal_recv.blocking_recv()
+        else {
+            return;
+        };
+
         decode_loop(
             &mut decoder_wrapper,
             shared_buffer,
+            renderer_sample_rate,
             decoder_to_renderer_sender,
             renderer_to_docoder_reciever,
-            // decoder_to_ve_signal_sender,
-            // ve_to_decoder_signal_recv,
             decoder_control_signal_recv,
             worker_to_player_notofication_signal_sender,
         );
@@ -198,7 +258,6 @@ pub async fn play_executor(
 
     for _ in 0..NUM_OF_BLOCK - 2 - BACK_ROOM {
         renderer_to_decoder_sender.send(RendererToDecoderSsynSignal());
-        //ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal());
     }
 
     let (ve_control_signal_sender, ve_control_signal_recv) = unbounded_channel();
@@ -259,7 +318,7 @@ pub async fn play_executor(
                         };
 
                         _ = sender.send(VeEnabledInfoFromPlayerToVe {
-                            sample_rate: ve_enabled_info.sample_rate,
+                            sample_rate: ve_enabled_info.audio_device_sample_rate,
                             renderer_read_exclusize: ve_enabled_info.ve_start_read_exclusize,
                             decorder_to_ve_signal_recv: ve_enabled_info.decorder_to_ve_signal_recv,
                             ve_to_decoder_signal_sender: ve_enabled_info
@@ -290,7 +349,7 @@ pub async fn play_executor(
     });
 
     let (renderer_control_signal_sender, renderer_control_signal_recv) = unbounded_channel();
-
+   
     let player_to_ui_singnal = player_to_ui_singnal_sender.clone();
     let renderer_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = unsafe { retrieve_ref(&shared_buffer_for_renderer) };
@@ -301,6 +360,7 @@ pub async fn play_executor(
             decoder_to_renderer_reciever,
             renderer_control_signal_recv,
             player_to_ui_singnal,
+            worker_to_player_notofication_signal_sender_for_renderer
         )
         .unwrap();
         //let res = res.ok();
@@ -334,7 +394,6 @@ pub async fn play_executor(
                     let (ve_to_decoder_signal_sender, ve_to_decoder_signal_recv) =
                         unbounded_channel();
                     let ve_enabled_signal = VeEnabledSignalFromPlayerToDecoder {
-                        sample_rate: sample_rate as usize,
                         decoder_to_ve_signal_sender,
                         decorder_to_ve_signal_recv,
                         ve_to_decoder_signal_sender,
@@ -391,6 +450,28 @@ pub async fn play_executor(
                     }
                     _ => panic!(),
                 },
+                Some(WorkerToPlayerNotification::NoticeAudioDeviceInfo(AudioDeviceInfo {
+                    sample_rate: audio_device_sample_rate,
+                })) => {
+                    let (file_sample_rate, audio_device_sample_rate) = (
+                        SampleRate::try_from(file_sample_rate).expect("unsupported_sample_rate"),
+                        SampleRate::try_from(audio_device_sample_rate)
+                            .expect("unsupported_sample_rate"),
+                    );
+                   
+
+                    decoder_init_signal_sender.send(DecoderInitSignal {
+                        renderer_sample_rate: audio_device_sample_rate.rawValue(),
+                    });
+
+                    player_to_ui_singnal_sender.send(PlayerToUISingnal::NoticeTrackInfo(
+                        TrackInfo {
+                            file_sample_rate: file_sample_rate.rawValue(),
+                            audio_device_sample_rate: audio_device_sample_rate.rawValue(),
+                            track_duration
+                        },
+                    ));
+                }
                 None => break 'l2,
             };
         }

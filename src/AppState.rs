@@ -145,16 +145,22 @@ pub mod AppState {
     }
 
     pub struct PlayingTrackInfo {
-        pub sample_rate: u32,
+        pub file_sample_rate: usize,
+        pub audio_device_sample_rate: usize,
         pub track_duraion: Duration,
         current_played_duration: Duration,
         audio_device_buffered_duration: Duration,
     }
 
     impl PlayingTrackInfo {
-        pub fn new(sample_rate: u32, track_duraion: Duration) -> Self {
+        pub fn new(
+            file_sample_rate: usize,
+            audio_device_sample_rate: usize,
+            track_duraion: Duration,
+        ) -> Self {
             Self {
-                sample_rate,
+                file_sample_rate,
+                audio_device_sample_rate,
                 track_duraion,
                 current_played_duration: Duration::ZERO,
                 audio_device_buffered_duration: Duration::ZERO,
@@ -167,12 +173,13 @@ pub mod AppState {
         }
 
         pub fn set_played_duration(&mut self, add_frames: u32, buffered_frames: u32) {
-            let add_duration = Duration::from_secs_f64(add_frames as f64 / self.sample_rate as f64);
+            let add_duration =
+                Duration::from_secs_f64(add_frames as f64 / self.audio_device_sample_rate as f64);
 
             self.current_played_duration =
                 self.current_played_duration.saturating_add(add_duration);
             self.audio_device_buffered_duration = Duration::from_secs_f64(
-                (buffered_frames + add_frames) as f64 / self.sample_rate as f64,
+                (buffered_frames + add_frames) as f64 / self.audio_device_sample_rate as f64,
             );
         }
     }

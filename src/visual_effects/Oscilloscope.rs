@@ -23,7 +23,7 @@ pub fn ve_loop(
     sample_rate: usize,
     mut read_exclusive: usize,
 ) {
-    const NUM_OF_BLOCK_LAST_INDEX:usize = NUM_OF_BLOCK - 1;
+    const NUM_OF_BLOCK_LAST_INDEX: usize = NUM_OF_BLOCK - 1;
     let next_block = |read_exclusive| match read_exclusive {
         NUM_OF_BLOCK_LAST_INDEX => 0,
         read_exclusive => read_exclusive + 1,
@@ -104,7 +104,7 @@ pub fn ve_loop(
                     }
                 }
 
-               _ = signal_to_decoder_thread();
+                _ = signal_to_decoder_thread();
 
                 read_exclusive = next_block(read_exclusive);
 

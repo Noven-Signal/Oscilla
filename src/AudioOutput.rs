@@ -4,6 +4,7 @@ use std::cmp;
 use std::time::{Duration, SystemTime};
 
 use imp::CreateEventW;
+use ratatui::symbols::block;
 use std::ops::Range;
 use std::ptr::null;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -17,9 +18,7 @@ use windows::{
 
 use crate::app::{PlayedFrames, PlayerToUISingnal};
 use crate::manipulation::{
-    AUDIO_OUTPUT_BUFFER_DURATION, BLOCK_SIZE, CHANNEL, DecoderToRendererSyncSignal,
-    EndOfStreamSignal, NUM_OF_BLOCK, RendererControlSignal, RendererToDecoderSsynSignal,
-    SharedBuffer,
+    AUDIO_OUTPUT_BUFFER_DURATION, AudioDeviceInfo, BLOCK_SIZE, CHANNEL, DecoderToRendererSyncSignal, EndOfStreamSignal, NUM_OF_BLOCK, RendererControlSignal, RendererToDecoderSsynSignal, SharedBuffer, WorkerToPlayerNotification
 };
 
 pub fn main(
@@ -28,6 +27,7 @@ pub fn main(
     decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderToRendererSyncSignal>,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
+    worker_to_player_notofication_signal_sender: UnboundedSender<WorkerToPlayerNotification>
 ) -> Result<()> {
     unsafe {
         let mut audio_output = AudioOutput::new(
@@ -37,6 +37,16 @@ pub fn main(
             control_signal_receiver,
             player_to_ui_singnal_sender,
         )?;
+
+        let wave_format_ptr = audio_output.audio_client.GetMixFormat()?;
+
+        let wave_format: WAVEFORMATEX = *wave_format_ptr;
+        worker_to_player_notofication_signal_sender.send(
+            WorkerToPlayerNotification::NoticeAudioDeviceInfo(AudioDeviceInfo {
+                sample_rate: wave_format.nSamplesPerSec as usize,
+            }),
+        );
+
         audio_output.start();
     }
     Ok(())
@@ -51,7 +61,7 @@ struct AudioOutput<'a> {
     renderer_to_decoder_singal_sender: UnboundedSender<RendererToDecoderSsynSignal>,
     decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderToRendererSyncSignal>,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
-    player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
+    player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>
 }
 
 impl<'a> AudioOutput<'a> {
@@ -82,7 +92,7 @@ impl<'a> AudioOutput<'a> {
             decoder_to_renderer_singal_recv,
             wasapi_event_hanle: handle,
             control_signal_receiver,
-            player_to_ui_singnal_sender,
+            player_to_ui_singnal_sender
         })
     }
     #[allow(unsafe_op_in_unsafe_fn)]
@@ -126,15 +136,10 @@ impl<'a> AudioOutput<'a> {
         let bits = wave_format.wBitsPerSample;
         let format_tag = wave_format.wFormatTag;
 
-        // println!(
-        //     "sample_rate: {sample_rate}, channels:{channels}, bits:{bits}, format_tag:{format_tag}"
-        // );
-        // println!("format_tag={:#x}", format_tag);
-        // 1 second buffer duration (100-nanosecond units)
         audio_client.Initialize(
             AUDCLNT_SHAREMODE_SHARED,
             AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-            AUDIO_OUTPUT_BUFFER_DURATION.as_nanos() as i64 / 100,
+            AUDIO_OUTPUT_BUFFER_DURATION.as_nanos() as i64 / 100, // 100-nanosecond units
             0,
             wave_format_ptr,
             Some(null()),
@@ -338,33 +343,5 @@ impl<'a> AudioOutput<'a> {
 impl<'a> Drop for AudioOutput<'a> {
     fn drop(&mut self) {
         unsafe { CoUninitialize() };
-    }
-}
-
-unsafe fn Fill_buff(
-    target_ptr: *mut u8,
-    ptr_len: usize,
-    left_ch_data: Vec<f32>,
-    range: Range<usize>,
-) {
-}
-
-unsafe fn fill_buffer_f32(
-    data: *mut u8,
-    frames: usize,
-    channels: usize,
-    phase: &mut f64,
-    phase_step: f64,
-) {
-    let samples = frames * channels;
-    let out = unsafe { std::slice::from_raw_parts_mut(data as *mut f32, samples) };
-
-    for frame in 0..frames {
-        for ch in 0..channels {
-            let sample = (*phase).sin();
-            out[frame * channels + ch] = sample as f32;
-        }
-
-        *phase += phase_step;
     }
 }

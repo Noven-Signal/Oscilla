@@ -12,6 +12,7 @@ use crate::{
 mod AppState;
 mod AudioDecoder;
 mod AudioOutput;
+mod ResamplerWrapper;
 mod DecoderWrapper;
 mod MyDefMacro;
 mod action;

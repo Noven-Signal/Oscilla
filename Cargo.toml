@@ -54,6 +54,9 @@ windows = { version = "0.56", features = [
      "Win32_System_Threading",
     
 ] }
+
+rubato = "3.0.0"
+
 rand = "0.10.1"
 
 [build-dependencies]
