@@ -7,6 +7,7 @@ use rubato::{
         direct::{SequentialSliceOfSlices, SequentialSliceOfVecs},
     },
 };
+use tracing::info;
 
 use crate::manipulation::CHANNEL;
 
@@ -18,19 +19,18 @@ impl RsamplerWrapper {
     pub fn new(
         sample_rate_input: usize,
         sample_rate_output: usize,
+        chunk_size: usize,
     ) -> color_eyre::eyre::Result<Self> {
         let resampler = Fft::<f32>::new(
             sample_rate_input,
             sample_rate_output,
-            1024,
+            chunk_size,
             2,
             CHANNEL,
             FixedSync::Both,
         )?;
 
-        Ok(Self {
-            resampler,
-        })
+        Ok(Self { resampler })
     }
 
     pub fn proc<'a>(
@@ -68,7 +68,8 @@ impl RsamplerWrapper {
         // It is also possible to use the `process_all_into_buffer` method
         // to process the entire file (including any last partial chunk) with a single call.
         while input_frames_left >= input_frames_next {
-            let (frames_read, frames_written) = &self.resampler
+            let (frames_read, frames_written) = &self
+                .resampler
                 .process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing))
                 .unwrap();
 
@@ -77,6 +78,9 @@ impl RsamplerWrapper {
             input_frames_left -= frames_read;
             input_frames_next = self.resampler.input_frames_next();
         }
+
+        info!("input_frames_left: {}", input_frames_left);
+        info!("input_frames_next: {}", input_frames_next);
 
         Ok(())
     }

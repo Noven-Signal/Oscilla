@@ -18,7 +18,7 @@ use windows::{
 
 use crate::app::{PlayedFrames, PlayerToUISingnal};
 use crate::manipulation::{
-    AUDIO_OUTPUT_BUFFER_DURATION, AudioDeviceInfo, BLOCK_SIZE, CHANNEL, DecoderToRendererSyncSignal, EndOfStreamSignal, NUM_OF_BLOCK, RendererControlSignal, RendererToDecoderSsynSignal, SharedBuffer, WorkerToPlayerNotification
+    AUDIO_OUTPUT_BUFFER_DURATION, AudioDeviceInfo, CHANNEL, DecoderToRendererSyncSignal, EndOfStreamSignal, NUM_OF_BLOCK, RendererControlSignal, RendererToDecoderSsynSignal, SharedBuffer, WorkerToPlayerNotification
 };
 
 pub fn main(
@@ -191,6 +191,8 @@ impl<'a> AudioOutput<'a> {
 
         _ = singnal_to_thread(read_exclusive);
         'l1: loop {
+            let get_block_len = |read_exclusive: usize| self.shared_buffer[read_exclusive][0].len();
+
             let mut paused = false;
             'control_singal_loop: loop {
                 if self.control_signal_receiver.is_empty() && !paused {
@@ -235,7 +237,7 @@ impl<'a> AudioOutput<'a> {
             if os_available == 0 {
                 continue 'l1;
             }
-            let available = cmp::min(os_available, BLOCK_SIZE);
+            let available = cmp::min(os_available, get_block_len(read_exclusive));
 
             let output_buffer = {
                 let ptr = self.render_client.GetBuffer(available as u32);
@@ -264,7 +266,7 @@ impl<'a> AudioOutput<'a> {
             let target_len = head + available;
 
             use std::cmp::Ordering::*;
-            match Ord::cmp(&target_len, &BLOCK_SIZE) {
+            match Ord::cmp(&target_len, &get_block_len(read_exclusive)) {
                 Less => {
                     fill_buff_within_block();
                     head = head + available;
@@ -300,9 +302,9 @@ impl<'a> AudioOutput<'a> {
 
                     read_exclusive = next_block(read_exclusive);
 
-                    let spill_over_len = head + available - BLOCK_SIZE;
+                    let spill_over_len = head + available - get_block_len(read_exclusive);
                     {
-                        assert!(spill_over_len < BLOCK_SIZE);
+                        assert!(spill_over_len < get_block_len(read_exclusive));
 
                         let get_src_slice =
                             |ch: usize| &self.shared_buffer[read_exclusive][ch][0..spill_over_len];
@@ -311,7 +313,7 @@ impl<'a> AudioOutput<'a> {
                         let src_slice_spill_over_ch_1 = get_src_slice(1);
 
                         let split_len_channel_combined = {
-                            let split_len_ch = BLOCK_SIZE - head;
+                            let split_len_ch = get_block_len(read_exclusive) - head;
                             split_len_ch * CHANNEL
                         };
                         for i in 0..src_slice_spill_over_ch_0.len() {

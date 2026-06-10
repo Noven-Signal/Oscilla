@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    AudioDecoder::decode_loop,
+    AudioDecoder::{BLOCK_SIZE_DEFAULT, decode_loop},
     AudioOutput,
     DecoderWrapper::DecoderWrapper,
     app::{PlayerToUISingnal, PlayerToUISingnalVeEnabled, TrackInfo},
@@ -68,7 +68,7 @@ impl TryFrom<usize> for SampleRate {
     }
 }
 impl SampleRate {
-    fn rawValue(&self) -> usize {
+    pub fn rawValue(&self) -> usize {
         *self as usize
     }
 }
@@ -143,7 +143,7 @@ pub struct VeControlSignalVeEnabled {
 }
 
 struct DecoderInitSignal {
-    renderer_sample_rate: usize,
+    renderer_sample_rate: SampleRate,
 }
 
 pub struct RendererInitSignal {
@@ -156,7 +156,7 @@ pub type SharedBuffer = [[Vec<f32>; CHANNEL]; NUM_OF_BLOCK];
 pub struct OscilloscopeData(pub Vec<(f64, f64)>);
 pub type VESharedBuffer = [[OscilloscopeData; CHANNEL]; NUM_OF_BLOCK_VE];
 
-pub const BLOCK_SIZE: usize = 147 * 160 * 4;
+//pub const BLOCK_SIZE: usize = 1024 * 16; //147 * 160 * 4;
 pub const CHANNEL: usize = 2;
 pub const NUM_OF_BLOCK: usize = 16;
 pub const BACK_ROOM: usize = 4;
@@ -210,7 +210,7 @@ pub async fn play_executor(
     let (renderer_to_decoder_sender, renderer_to_docoder_reciever) = mpsc::unbounded_channel();
     let (decoder_to_renderer_sender, decoder_to_renderer_reciever) = mpsc::unbounded_channel();
 
-    let mut shared_buffer = array_init(|| array_init(|| vec![0f32; BLOCK_SIZE]));
+    let mut shared_buffer = array_init(|| array_init(|| vec![0f32; BLOCK_SIZE_DEFAULT]));
 
     let shared_buffer_for_decoder = AtomicPtr::new(&raw mut shared_buffer);
     let shared_buffer_for_renderer = AtomicPtr::new(&raw mut shared_buffer);
@@ -461,7 +461,7 @@ pub async fn play_executor(
                    
 
                     decoder_init_signal_sender.send(DecoderInitSignal {
-                        renderer_sample_rate: audio_device_sample_rate.rawValue(),
+                        renderer_sample_rate: audio_device_sample_rate,
                     });
 
                     player_to_ui_singnal_sender.send(PlayerToUISingnal::NoticeTrackInfo(

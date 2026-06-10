@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     manipulation::{
-        BLOCK_SIZE, CHANNEL, DecorderToVeSyncSignal, NUM_OF_BLOCK, NUM_OF_BLOCK_VE, OscilloscopeData, SharedBuffer, UiVEThreadSyncSignal, VESharedBuffer, VeControlSignal, VeToDecoderSyncSignal
+         CHANNEL, DecorderToVeSyncSignal, NUM_OF_BLOCK, NUM_OF_BLOCK_VE, OscilloscopeData, SharedBuffer, UiVEThreadSyncSignal, VESharedBuffer, VeControlSignal, VeToDecoderSyncSignal
     },
     utils::array_init,
 };
@@ -58,6 +58,8 @@ pub fn ve_loop(
     // return;
 
     'l1: loop {
+        let get_block_size = |read_exclusive: usize| shared_buffer[read_exclusive][0].len();
+
         if ve_cancellation_token.is_cancelled() {
             break 'l1;
         }
@@ -81,7 +83,7 @@ pub fn ve_loop(
         let target_len = read_head + available;
 
         use std::cmp::Ordering::*;
-        match Ord::cmp(&target_len, &BLOCK_SIZE) {
+        match Ord::cmp(&target_len, &get_block_size(read_exclusive)) {
             Less => {
                 fill_buff_within_block();
                 read_head = read_head + move_window;
@@ -93,11 +95,11 @@ pub fn ve_loop(
                 read_head = 0;
             }
             Greater => {
-                if BLOCK_SIZE > read_head {
+                if get_block_size(read_exclusive) > read_head {
                     for ch in 0..CHANNEL {
                         let src = &shared_buffer[read_exclusive][ch][read_head..];
                         let target =
-                            &mut ve_shared_buffer[write_exclusive][ch].0[0..BLOCK_SIZE - read_head];
+                            &mut ve_shared_buffer[write_exclusive][ch].0[0..get_block_size(read_exclusive) - read_head];
                         //target.copy_from_slice(src);
 
                         mem_copy_with_conversion(src, target);
@@ -108,10 +110,10 @@ pub fn ve_loop(
 
                 read_exclusive = next_block(read_exclusive);
 
-                let moved_head = read_head + available - BLOCK_SIZE;
+                let moved_head = read_head + available - get_block_size(read_exclusive);
                 {
-                    let src_start = read_head.saturating_sub(BLOCK_SIZE);
-                    let target_start = BLOCK_SIZE.saturating_sub(read_head);
+                    let src_start = read_head.saturating_sub(get_block_size(read_exclusive));
+                    let target_start = get_block_size(read_exclusive).saturating_sub(read_head);
                     for ch in 0..CHANNEL {
                         let src = &shared_buffer[read_exclusive][ch][src_start..moved_head];
                         let target = &mut ve_shared_buffer[write_exclusive][ch].0[target_start..];

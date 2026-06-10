@@ -8,18 +8,20 @@ use crate::{
     DecoderWrapper::{DecodeResult, DecoderWrapper},
     ResamplerWrapper::{self, RsamplerWrapper},
     manipulation::{
-        BLOCK_SIZE, CHANNEL, DecoderControlSignal, DecoderToRendererSyncSignal,
-        DecorderToVeSyncSignal, EndOfStreamSignal, NUM_OF_BLOCK, RendererToDecoderSsynSignal,
-        SharedBuffer, VeEnabledInfoFromDecoder, VeEnabledSignalFromPlayerToDecoder,
-        VeToDecoderSyncSignal, WorkerToPlayerNotification,
+        CHANNEL, DecoderControlSignal, DecoderToRendererSyncSignal, DecorderToVeSyncSignal,
+        EndOfStreamSignal, NUM_OF_BLOCK, RendererToDecoderSsynSignal, SampleRate, SharedBuffer,
+        VeEnabledInfoFromDecoder, VeEnabledSignalFromPlayerToDecoder, VeToDecoderSyncSignal,
+        WorkerToPlayerNotification,
     },
     utils::array_init,
 };
 
+pub const BLOCK_SIZE_DEFAULT: usize = 1024 * 16;
+
 pub fn decode_loop(
     decoder_wrapper: &mut DecoderWrapper,
     shared_buffer: &mut SharedBuffer,
-    audio_device_sample_rate: usize,
+    audio_device_sample_rate: SampleRate,
     decoder_to_renderer_sender: UnboundedSender<DecoderToRendererSyncSignal>,
     mut renderer_to_decoder_singal_recv: UnboundedReceiver<RendererToDecoderSsynSignal>,
     mut decoder_control_signal: UnboundedReceiver<DecoderControlSignal>,
@@ -52,7 +54,7 @@ pub fn decode_loop(
             }
             decoder_to_renderer_sender.send(send_signal)
         };
-    let mut singnal_to_thread_sync =
+    let singnal_to_thread_sync =
         |renderer_to_decoder_singal_recv: &mut UnboundedReceiver<RendererToDecoderSsynSignal>,
          ve_signal: &mut Option<VeSignal>| {
             singnal_to_thread(
@@ -65,34 +67,63 @@ pub fn decode_loop(
     let mut write_exclusive: usize = 0;
     let mut count = 0;
     let mut head: usize = 0;
-    let mut type_conversion_buff: [Vec<f32>; CHANNEL] = array_init(|| vec![0f32; BLOCK_SIZE]);
+
     let mut block_count: usize = 0;
 
     let Some(file_sample_rate) = decoder_wrapper.get_sample_rate() else {
         return;
     };
 
+    let Ok(file_sample_rate) = SampleRate::try_from(file_sample_rate as usize) else {
+        return;
+    };
+
     struct ResampleContainer {
         decode_tmp_block: [Vec<f32>; 2],
         resampler_wrapper: RsamplerWrapper,
+        block_size: usize,
     }
 
     let mut resample_container: Option<ResampleContainer> =
-        if audio_device_sample_rate == file_sample_rate as usize {
+        if audio_device_sample_rate == file_sample_rate {
             None
         } else {
+            use SampleRate::*;
+            let base = match file_sample_rate {
+                R44100 | R88200 | R176400 => 147,
+                R48000 | R96000 | R192000 => 160,
+            };
+            let multiple = match file_sample_rate {
+                R44100 | R48000 => 1,
+                R88200 | R96000 => 2,
+                R176400 | R192000 => 4,
+            };
+
+            let decode_tmp_block = (base * multiple * 100) as usize;
+
+
             Some(ResampleContainer {
-                decode_tmp_block: array_init(|| {
-                    vec![0f32; (BLOCK_SIZE * file_sample_rate as usize) / audio_device_sample_rate]
-                }),
+                decode_tmp_block: array_init(|| vec![0f32; decode_tmp_block]),
                 resampler_wrapper: RsamplerWrapper::new(
                     file_sample_rate as usize,
-                    audio_device_sample_rate,
+                    audio_device_sample_rate.rawValue(),
+                    base * multiple,
                 )
                 .unwrap(),
+                block_size: (decode_tmp_block * audio_device_sample_rate.rawValue())
+                    / file_sample_rate.rawValue(),
             })
         };
 
+    let mut type_conversion_buff: [Vec<f32>; CHANNEL] = array_init(|| {
+        vec![
+            0f32;
+            match resample_container {
+                Some(ref x) => x.block_size,
+                None => BLOCK_SIZE_DEFAULT,
+            }
+        ]
+    });
 
     macro_rules! get_exclusizebuff {
         () => {
@@ -109,6 +140,13 @@ pub fn decode_loop(
     }
 
     'l1: loop {
+        let get_block_size = || {
+            if let Some(ResampleContainer { block_size, .. }) = resample_container {
+                block_size
+            } else {
+                BLOCK_SIZE_DEFAULT
+            }
+        };
         if !decoder_control_signal.is_empty() {
             match decoder_control_signal.blocking_recv() {
                 Some(DecoderControlSignal::Stop) => {
@@ -140,15 +178,15 @@ pub fn decode_loop(
                         let target_block_count =
                             block_count as i32 + len as i32 + 1 - NUM_OF_BLOCK as i32;
 
-                        let target_duration = (target_block_count as f64 * BLOCK_SIZE as f64)
-                            / audio_device_sample_rate as f64;
+                        let target_duration = (target_block_count as f64 * get_block_size() as f64)
+                            / audio_device_sample_rate.rawValue() as f64;
 
                         target_duration
                     };
 
                     decoder_to_player_notification_signal.send(
                         WorkerToPlayerNotification::VeEnabledInfo(VeEnabledInfoFromDecoder {
-                            audio_device_sample_rate,
+                            audio_device_sample_rate: audio_device_sample_rate.rawValue(),
                             ve_start_read_exclusize,
                             decorder_to_ve_signal_recv,
                             ve_to_decoder_signal_sender,
@@ -197,14 +235,23 @@ pub fn decode_loop(
                     if let Some(ResampleContainer {
                         decode_tmp_block,
                         resampler_wrapper,
+                        block_size,
                     }) = resample_container
                     {
+                        for ch in 0..CHANNEL {
+                            target_buffer[ch].resize(*block_size, 0f32);
+                        }
+
                         let [target_buffer_ch_0, target_buffer_ch_1] = target_buffer;
 
                         resampler_wrapper.proc(
                             &[0, 1].map(|x| decode_tmp_block[x].as_slice()),
                             &mut [target_buffer_ch_0, target_buffer_ch_1],
                         );
+
+                        info!("target_len_a: {}", target_buffer_ch_0[target_buffer_ch_0.len() - 2000]);
+                        info!("target_len_b: {}", target_buffer_ch_0[target_buffer_ch_0.len() - 1000 ]);
+                        info!("target_len_c: {}", target_buffer_ch_0[target_buffer_ch_0.len() - 300]);
                     }
                 };
 
@@ -212,7 +259,7 @@ pub fn decode_loop(
             let threshold_len = if let Some(ref x) = resample_container {
                 x.decode_tmp_block[0].len()
             } else {
-                BLOCK_SIZE
+                BLOCK_SIZE_DEFAULT
             };
             use std::cmp::Ordering::*;
             match Ord::cmp(&target_len, &threshold_len) {
