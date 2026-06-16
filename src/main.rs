@@ -4,7 +4,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
     AppState::AppState::{AppStateContainer, PlayState},
-    app::App,
+    app::{App, AppContorlSignal},
     manipulation::PlayerControlSignal,
     widgets::AppRoot::*,
 };
@@ -57,10 +57,11 @@ async fn main() -> color_eyre::Result<()> {
         .filter(|arg| arg != current_exe_path)
         .collect::<Vec<String>>();
 
+    let (app_control_signal_sender,app_control_signal_recv) = unbounded_channel::<AppContorlSignal>();
 
-    let app_state_container = AppStateContainer::new(filtered_args);
+    let app_state_container = AppStateContainer::new(app_control_signal_sender,filtered_args);
 
-    let mut app = App::new(AppRoot::default(), app_state_container)?;
+    let mut app = App::new(AppRoot::default(), app_state_container,app_control_signal_recv)?;
     app.run().await?;
 
     Ok(())

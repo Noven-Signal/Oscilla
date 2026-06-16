@@ -32,6 +32,7 @@ pub fn main(
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
     worker_to_player_notofication_signal_sender: UnboundedSender<WorkerToPlayerNotification>,
+    init_vol: u16
 ) -> Result<()> {
     unsafe {
         let mut audio_output = AudioOutput::new(
@@ -49,7 +50,7 @@ pub fn main(
             }),
         );
 
-        audio_output.start();
+        audio_output.start(init_vol);
     }
     Ok(())
 }
@@ -105,9 +106,9 @@ impl<'a> AudioOutput<'a> {
         })
     }
     #[allow(unsafe_op_in_unsafe_fn)]
-    unsafe fn start(&mut self) -> Result<()> {
+    unsafe fn start(&mut self,init_vol: u16) -> Result<()> {
         self.audio_client.Start()?;
-        self.render_loop()?;
+        self.render_loop(init_vol)?;
         Ok(())
     }
 
@@ -172,7 +173,7 @@ impl<'a> AudioOutput<'a> {
     }
 
     #[allow(unsafe_op_in_unsafe_fn)]
-    unsafe fn render_loop(&mut self) -> Result<()> {
+    unsafe fn render_loop(&mut self, init_vol: u16) -> Result<()> {
         const NUM_OF_BLOCK_LAST_INDEX: usize = NUM_OF_BLOCK - 1;
         let next_block = |read_exclusive| match read_exclusive {
             NUM_OF_BLOCK_LAST_INDEX => 0,
@@ -189,7 +190,7 @@ impl<'a> AudioOutput<'a> {
         let mut head: usize = 0;
         let mut read_exclusive: usize = 0;
         // let mut count = 0;
-        let mut vol = 1f32;
+        let mut vol = (init_vol as f32) / 100f32;
 
         enum SendSignalResult {
             OK,
@@ -381,7 +382,6 @@ impl<'a> AudioOutput<'a> {
                 let current_padding = self.audio_client.GetCurrentPadding()?;
                 let buffered_duration =
                     Duration::from_secs_f64(current_padding as f64 / sample_rate as f64);
-                info!("buffered_duration: {}", buffered_duration.as_secs_f32());
 
                 'l2: loop {
                     Self::wait_for_wasapi_event(self.wasapi_event_hanle)?;

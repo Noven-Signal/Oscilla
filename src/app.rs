@@ -55,6 +55,10 @@ pub struct Ves {
 #[derive(Clone, Copy)]
 pub struct VeSwitcherSyncSignal();
 
+pub enum AppContorlSignal {
+    StartPlayer(usize),
+}
+
 pub struct App {
     root_wiget: AppRoot,
     tui: Tui,
@@ -63,6 +67,7 @@ pub struct App {
     ve_switcher_sync_signal_sender: UnboundedSender<VeSwitcherSyncSignal>,
     ve_switcher_sync_signal_recv: UnboundedReceiver<VeSwitcherSyncSignal>,
     player_to_ui_signal_recv: Option<UnboundedReceiver<PlayerToUISingnal>>,
+    app_control_signal_recv: UnboundedReceiver<AppContorlSignal>,
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -100,6 +105,7 @@ impl App {
     pub fn new(
         root_wiget: AppRoot,
         app_state_container: AppStateContainer,
+        app_control_signal_recv: UnboundedReceiver<AppContorlSignal>,
     ) -> color_eyre::Result<Self> {
         let (ve_switcher_request_signal_sender, ve_switcher_request_signal_recv) =
             unbounded_channel();
@@ -112,10 +118,14 @@ impl App {
             ve_switcher_sync_signal_sender: ve_switcher_request_signal_sender,
             ve_switcher_sync_signal_recv: ve_switcher_request_signal_recv,
             player_to_ui_signal_recv: None,
+            app_control_signal_recv,
         })
     }
 
     fn start_player(&mut self, idx: usize) {
+        if let Some(_) = self.app_state_container.player_thread{
+            return;
+        }
         let (player_to_ui_signal_sender, player_to_ui_signal_recv) = unbounded_channel();
         self.player_to_ui_signal_recv = Some(player_to_ui_signal_recv);
 
@@ -126,7 +136,7 @@ impl App {
         let (player_control_signal_sender, mut player_control_signal_recv) = unbounded_channel();
 
         //app_state_container.player_control_singnal_sender = Some(player_control_signal_sender);
-
+        let init_vol = app_state_container.vol_state;
         let player_handle = tokio::spawn(async move {
             let Some(first_track) = play_list_arc.get(idx) else {
                 return;
@@ -134,6 +144,7 @@ impl App {
 
             manipulation::play_executor(
                 first_track,
+                init_vol,
                 &mut player_control_signal_recv,
                 player_to_ui_signal_sender,
             )
@@ -155,7 +166,9 @@ impl App {
     }
 
     pub async fn run(&mut self) -> color_eyre::Result<()> {
-        self.start_player(0);
+        if let Some(_) = self.app_state_container.play_list.first() {
+            self.start_player(0);
+        }
 
         self.tui.enter()?;
 
@@ -233,6 +246,11 @@ impl App {
             };
 
             tokio::select! {
+                Some(signal) = self.app_control_signal_recv.recv() => {
+                    match signal {
+                        AppContorlSignal::StartPlayer(idx) => self.start_player(idx),
+                    }
+                }
                 Some(signal) = async{
                     match self.player_to_ui_signal_recv {
                         Some(ref mut recv) => recv.recv().await,
@@ -462,7 +480,8 @@ impl App {
                 let Some(PlayerThread {
                     ref mut player_control_singnal_sender,
                     ..
-                }) = self.app_state_container.player_thread else {
+                }) = self.app_state_container.player_thread
+                else {
                     break 'b1;
                 };
                 player_control_singnal_sender.send(PlayerControlSignal::Stop);

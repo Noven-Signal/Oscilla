@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 use tokio::task::JoinHandle;
 
     use crate::AppState::AppState::VeSelectedTab::Oscilloscope;
-    use crate::app::Ves;
+    use crate::app::{AppContorlSignal, Ves};
     use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
@@ -279,10 +279,11 @@ use tokio::task::JoinHandle;
         pub ve_switcher_request_signal_sender: UnboundedSender<VeSwitcherRequestSignal>,
         pub ve_switcher_request_signal_recv: UnboundedReceiver<VeSwitcherRequestSignal>,
         pub wait_next_tack_idx: Option<usize>,
+        pub app_control_signal_sender: UnboundedSender<AppContorlSignal>
     }
 
     impl AppStateContainer {
-        pub fn new(list: Vec<String>) -> Self {
+        pub fn new(app_control_signal_sender: UnboundedSender<AppContorlSignal>, list: Vec<String>) -> Self {
             let (ve_switcher_request_signal_sender, ve_switcher_request_signal_recv) =
                 unbounded_channel();
             Self {
@@ -300,6 +301,7 @@ use tokio::task::JoinHandle;
                 ve_switcher_request_signal_sender,
                 ve_switcher_request_signal_recv,
                 wait_next_tack_idx: None,
+                app_control_signal_sender
             }
         }
     }

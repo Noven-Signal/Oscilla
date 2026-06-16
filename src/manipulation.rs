@@ -166,6 +166,7 @@ pub const AUDIO_OUTPUT_BUFFER_DURATION: Duration = Duration::from_secs(1);
 
 pub async fn play_executor(
     playback_file_path: &str,
+    init_vol:u16,
     player_control_signal_recv: &mut UnboundedReceiver<PlayerControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
 ) {
@@ -336,6 +337,7 @@ pub async fn play_executor(
             renderer_control_signal_recv,
             player_to_ui_singnal,
             worker_to_player_notofication_signal_sender_for_renderer,
+            init_vol
         )
         .unwrap();
         //let res = res.ok();
