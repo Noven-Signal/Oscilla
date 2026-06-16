@@ -36,6 +36,7 @@ pub enum ButtonIdent {
 pub enum PlayButtonState {
     Playing,
     Paused,
+    Stopped
 }
 impl PlayButtonState {
     pub fn new(app_state_container: &AppStateContainer) -> Self {
@@ -43,7 +44,7 @@ impl PlayButtonState {
         match app_state_container.play_state {
             Playing(_) => Self::Playing,
             Paused(_) => Self::Paused,
-            Stop => todo!(),
+            Stopped => todo!(),
         }
     }
 }
@@ -52,6 +53,7 @@ impl ButtonIdent {
         match self {
             ButtonIdent::PlayOrPause(PlayButtonState::Playing) => "Pause",
             ButtonIdent::PlayOrPause(PlayButtonState::Paused) => "Play",
+            ButtonIdent::PlayOrPause(PlayButtonState::Stopped) => "Play",
             ButtonIdent::Prev => "prev",
             ButtonIdent::Next => "next",
         }

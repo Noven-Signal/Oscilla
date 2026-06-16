@@ -1,11 +1,12 @@
 pub mod AppState {
     use std::ops::Index;
     use std::sync::Arc;
-    use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime};
 
     use crossterm::event::KeyCode;
     use ratatui::widgets::ListState;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::task::JoinHandle;
 
     use crate::AppState::AppState::VeSelectedTab::Oscilloscope;
     use crate::app::Ves;
@@ -187,7 +188,7 @@ pub mod AppState {
     pub enum PlayState {
         Playing(usize),
         Paused(usize),
-        Stop,
+        Stopped,
     }
 
     impl PlayState {
@@ -195,7 +196,7 @@ pub mod AppState {
             match self {
                 PlayState::Playing(_) => PlayButtonState::Playing,
                 PlayState::Paused(_) => PlayButtonState::Paused,
-                PlayState::Stop => todo!(),
+                PlayState::Stopped => PlayButtonState::Stopped,
             }
         }
     }
@@ -253,8 +254,13 @@ pub mod AppState {
     }
 
     #[derive(Clone, Copy)]
-    pub struct VeSwitcherReeustSignal {
-        pub requestTab: VeSelectedTab,
+    pub struct VeSwitcherRequestSignal {
+        pub request_tab: VeSelectedTab,
+    }
+
+    pub struct PlayerThread{
+        pub handle: JoinHandle<()>,
+        pub player_control_singnal_sender: UnboundedSender<PlayerControlSignal>,
     }
 
     //type ButtonIdentToHandler = HashMap<ButtonIdent, Box<dyn Fn() + Send>>;
@@ -266,12 +272,13 @@ pub mod AppState {
         pub play_list_selected: ListState,
         pub play_state: PlayState,
         pub playing_track_info: Option<PlayingTrackInfo>,
-        pub player_control_singnal_sender: Option<UnboundedSender<PlayerControlSignal>>,
+        pub player_thread: Option<PlayerThread>,
         pub ve_shared_buffer: Option<VESharedBuffer>,
         pub ve_selected: VeSelectedTab,
         pub ve_channel: Option<Ves>,
-        pub ve_switcher_request_signal_sender: UnboundedSender<VeSwitcherReeustSignal>,
-        pub ve_switcher_request_signal_recv: UnboundedReceiver<VeSwitcherReeustSignal>,
+        pub ve_switcher_request_signal_sender: UnboundedSender<VeSwitcherRequestSignal>,
+        pub ve_switcher_request_signal_recv: UnboundedReceiver<VeSwitcherRequestSignal>,
+        pub wait_next_tack_idx: Option<usize>,
     }
 
     impl AppStateContainer {
@@ -284,14 +291,15 @@ pub mod AppState {
                 play_list: Arc::new(list),
                 vol_state: 100,
                 play_list_selected: ListState::default(),
-                play_state: PlayState::Stop,
-                player_control_singnal_sender: None,
+                play_state: PlayState::Stopped,
+                player_thread: None,
                 playing_track_info: None,
                 ve_shared_buffer: None,
                 ve_selected: VeSelectedTab::Off,
                 ve_channel: None,
                 ve_switcher_request_signal_sender,
                 ve_switcher_request_signal_recv,
+                wait_next_tack_idx: None,
             }
         }
     }

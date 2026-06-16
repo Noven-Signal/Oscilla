@@ -1,10 +1,12 @@
+use crossterm::event::Event::Key;
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, List, ListDirection, ListItem, ListState, Widget};
 
-use crate::AppState::AppState::{AppStateContainer, AreaHandler};
+use crate::AppState::AppState::{AppStateContainer, AreaHandler, PlayerThread};
 use crate::extensions::OnceLock::OnceLock_ext;
 use crate::extensions::Rect::RectExtension;
+use crate::manipulation::*;
 use crate::{AppState, get_decorated_border};
 
 #[derive(Default)]
@@ -14,7 +16,6 @@ impl StatefulWidget for ListArea {
     type State = AppStateContainer;
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut AppStateContainer) {
         use AppState::AppState::*;
-        
 
         let block = get_decorated_border!(state.focus_state, Tabs::ListArea);
 
@@ -43,6 +44,24 @@ impl AreaHandler for ListArea {
         match key_code {
             KeyCode::Up => app_state_container.play_list_selected.select_previous(),
             KeyCode::Down => app_state_container.play_list_selected.select_next(),
+            KeyCode::Enter => 'b1: {
+                let Some(idx) = app_state_container.play_list_selected.selected() else {
+                    break 'b1;
+                };
+                let Some(PlayerThread {
+                    player_control_singnal_sender,
+                    ..
+                }) = &mut app_state_container.player_thread
+                else {
+                    break 'b1;
+                };
+
+                app_state_container.wait_next_tack_idx = Some(idx);
+
+                if let Err(_) = player_control_singnal_sender.send(PlayerControlSignal::Stop) {
+                    break 'b1;
+                }
+            }
             _ => {}
         }
     }

@@ -2,10 +2,12 @@ use std::cmp;
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 use crate::{
     manipulation::{
-         CHANNEL, DecorderToVeSyncSignal, NUM_OF_BLOCK, NUM_OF_BLOCK_VE, OscilloscopeData, SharedBuffer, UiVEThreadSyncSignal, VESharedBuffer, VeControlSignal, VeToDecoderSyncSignal
+        CHANNEL, DecorderToVeSyncSignal, NUM_OF_BLOCK, NUM_OF_BLOCK_VE, OscilloscopeData,
+        SharedBuffer, UiVEThreadSyncSignal, VESharedBuffer, VeControlSignal, VeToDecoderSyncSignal,
     },
     utils::array_init,
 };
@@ -36,11 +38,10 @@ pub fn ve_loop(
     let mut write_exclusive: usize = 0;
     let mut count = 0;
 
-    let  move_window = sample_rate / FRAME_RATE;
-    
+    let move_window = sample_rate / FRAME_RATE;
 
     let mut signal_to_decoder_thread = || {
-        decoder_to_ve_recv.blocking_recv();
+                decoder_to_ve_recv.blocking_recv();
         ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal())
     };
 
@@ -98,8 +99,8 @@ pub fn ve_loop(
                 if get_block_size(read_exclusive) > read_head {
                     for ch in 0..CHANNEL {
                         let src = &shared_buffer[read_exclusive][ch][read_head..];
-                        let target =
-                            &mut ve_shared_buffer[write_exclusive][ch].0[0..get_block_size(read_exclusive) - read_head];
+                        let target = &mut ve_shared_buffer[write_exclusive][ch].0
+                            [0..get_block_size(read_exclusive) - read_head];
                         //target.copy_from_slice(src);
 
                         mem_copy_with_conversion(src, target);

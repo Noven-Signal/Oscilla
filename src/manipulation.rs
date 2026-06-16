@@ -31,6 +31,7 @@ pub enum DecoderToRendererSyncSignal {
 }
 pub struct EndOfStreamSignal {
     pub last_block: usize,
+    pub filled_len: usize
 }
 pub struct RendererToDecoderSsynSignal();
 
@@ -134,7 +135,7 @@ pub struct VeEnabledSignalFromPlayerToDecoder {
 pub enum VeControlSignal {
     VeEnabled(VeControlSignalVeEnabled),
     VeDisabled,
-    PlayStop,
+    Stop,
 }
 pub struct VeControlSignalVeEnabled {
     pub ve_enabled_info: VeEnabledInfoFromDecoder,
@@ -168,30 +169,7 @@ pub async fn play_executor(
     player_control_signal_recv: &mut UnboundedReceiver<PlayerControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
 ) {
-    let probe = get_probe();
-    use std::fs::File;
-    let Ok(file) = File::open(playback_file_path) else {
-        return;
-    };
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-
-    let mut hint = Hint::new();
-    let extension = match Path::extension(Path::new(playback_file_path)) {
-        Some(os_str) => match os_str.to_str() {
-            Some(str) => str,
-            None => "",
-        },
-        None => "",
-    };
-    hint.with_extension(extension);
-    let probe_result = probe.format(&hint, mss, &Default::default(), &Default::default());
-    let format_reader = match probe_result {
-        Ok(res) => res.format,
-        Err(_) => todo!(),
-    };
-
-    let decoder_wrapper = DecoderWrapper::new(format_reader);
-    let mut decoder_wrapper = match decoder_wrapper {
+    let mut decoder_wrapper = match DecoderWrapper::new(playback_file_path) {
         Ok(d) => d,
         Err(_) => todo!(),
     };
@@ -210,7 +188,7 @@ pub async fn play_executor(
     let (renderer_to_decoder_sender, renderer_to_docoder_reciever) = mpsc::unbounded_channel();
     let (decoder_to_renderer_sender, decoder_to_renderer_reciever) = mpsc::unbounded_channel();
 
-    let mut shared_buffer = array_init(|| array_init(|| vec![0f32; BLOCK_SIZE_DEFAULT]));
+    let mut shared_buffer = array_init(|| array_init(|| vec![0f32; 0]));
 
     let shared_buffer_for_decoder = AtomicPtr::new(&raw mut shared_buffer);
     let shared_buffer_for_renderer = AtomicPtr::new(&raw mut shared_buffer);
@@ -235,6 +213,7 @@ pub async fn play_executor(
 
     let worker_to_player_notofication_signal_sender_for_ve =
         worker_to_player_notofication_signal_sender.clone();
+    let player_to_ui_singnal_for_decoder = player_to_ui_singnal_sender.clone();
     let decoder_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = unsafe { retrieve_ref(&shared_buffer_for_decoder) };
 
@@ -253,6 +232,7 @@ pub async fn play_executor(
             renderer_to_docoder_reciever,
             decoder_control_signal_recv,
             worker_to_player_notofication_signal_sender,
+            player_to_ui_singnal_for_decoder
         );
     });
 
@@ -271,7 +251,6 @@ pub async fn play_executor(
         let (sender, mut recv) = unbounded_channel::<VeEnabledInfoFromPlayerToVe>();
 
         let handle = tokio::task::spawn_blocking(move || {
-            let mut disable_call_count_ve = 0;
             'l1: loop {
                 match recv.blocking_recv() {
                     Some(mut signal) => {
@@ -292,10 +271,6 @@ pub async fn play_executor(
                         );
                         worker_to_player_notofication_signal_sender_for_ve
                             .send(WorkerToPlayerNotification::VeDisabledSync);
-                        disable_call_count_ve.add_assign(1);
-                        info!("disable_call_count_ve: {disable_call_count_ve}");
-
-                        //player_to_ui_singnal_sender_for_ve.send(PlayerToUISingnal::VeDisabled);
                     }
                     None => break 'l1,
                 }
@@ -329,7 +304,7 @@ pub async fn play_executor(
                             cancellation_token,
                         })
                     }
-                    Some(VeControlSignal::PlayStop) => {
+                    Some(VeControlSignal::Stop) => {
                         if let Some(token) = &cancellation_token {
                             token.cancel();
                         }
@@ -349,7 +324,7 @@ pub async fn play_executor(
     });
 
     let (renderer_control_signal_sender, renderer_control_signal_recv) = unbounded_channel();
-   
+
     let player_to_ui_singnal = player_to_ui_singnal_sender.clone();
     let renderer_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = unsafe { retrieve_ref(&shared_buffer_for_renderer) };
@@ -360,7 +335,7 @@ pub async fn play_executor(
             decoder_to_renderer_reciever,
             renderer_control_signal_recv,
             player_to_ui_singnal,
-            worker_to_player_notofication_signal_sender_for_renderer
+            worker_to_player_notofication_signal_sender_for_renderer,
         )
         .unwrap();
         //let res = res.ok();
@@ -385,7 +360,7 @@ pub async fn play_executor(
                 PlayerControlSignal::Stop => {
                     renderer_control_signal_sender.send(RendererControlSignal::Stop);
                     decoder_control_signal_sender.send(DecoderControlSignal::Stop);
-                    ve_control_signal_sender.send(VeControlSignal::PlayStop);
+                    ve_control_signal_sender.send(VeControlSignal::Stop);
                     break 'l1;
                 }
                 PlayerControlSignal::VeEnabled(ve_shared_buffer) => {
@@ -458,7 +433,6 @@ pub async fn play_executor(
                         SampleRate::try_from(audio_device_sample_rate)
                             .expect("unsupported_sample_rate"),
                     );
-                   
 
                     decoder_init_signal_sender.send(DecoderInitSignal {
                         renderer_sample_rate: audio_device_sample_rate,
@@ -468,7 +442,7 @@ pub async fn play_executor(
                         TrackInfo {
                             file_sample_rate: file_sample_rate.rawValue(),
                             audio_device_sample_rate: audio_device_sample_rate.rawValue(),
-                            track_duration
+                            track_duration,
                         },
                     ));
                 }

@@ -15,7 +15,7 @@ use ratatui::{
 
 use crate::{
     AppState::AppState::{
-        AppStateContainer, AreaHandler, PlayingTrackInfo, TabState, VeSelectedTab, VeSwitcherReeustSignal,
+        AppStateContainer, AreaHandler, PlayingTrackInfo, TabState, VeSelectedTab, VeSwitcherRequestSignal,
     },
     app::{self, TrackInfo, VeSwitcherSyncSignal, Ves},
     extensions::Rect::RectExtension,
@@ -132,6 +132,6 @@ impl AreaHandler for EffectArea {
         }
         *ve_selected = target_tab;
 
-        app_state_container.ve_switcher_request_signal_sender.send(VeSwitcherReeustSignal{ requestTab: target_tab});
+        app_state_container.ve_switcher_request_signal_sender.send(VeSwitcherRequestSignal{ request_tab: target_tab});
     }
 }

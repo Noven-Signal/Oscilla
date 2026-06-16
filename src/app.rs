@@ -4,13 +4,15 @@ use std::{
     pin::Pin,
     sync::atomic::{AtomicPtr, Ordering},
     time::{Duration, SystemTime},
+    usize,
 };
 
 use crate::{
     AppState::{
         self,
         AppState::{
-            AppStateContainer, PlayState, PlayingTrackInfo, VeSelectedTab, VeSwitcherReeustSignal,
+            AppStateContainer, PlayState, PlayerThread, PlayingTrackInfo, VeSelectedTab,
+            VeSwitcherRequestSignal,
         },
     },
     app,
@@ -60,6 +62,7 @@ pub struct App {
     event_loop_canceled: bool,
     ve_switcher_sync_signal_sender: UnboundedSender<VeSwitcherSyncSignal>,
     ve_switcher_sync_signal_recv: UnboundedReceiver<VeSwitcherSyncSignal>,
+    player_to_ui_signal_recv: Option<UnboundedReceiver<PlayerToUISingnal>>,
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -83,6 +86,8 @@ pub enum PlayerToUISingnal {
     VeEnabled(PlayerToUISingnalVeEnabled),
     VeEnabledSync,
     VeDisabled,
+    RendererPlayCompleted,
+    EndOfStream,
 }
 
 pub struct PlayerToUISingnalVeEnabled {
@@ -106,34 +111,39 @@ impl App {
             event_loop_canceled: false,
             ve_switcher_sync_signal_sender: ve_switcher_request_signal_sender,
             ve_switcher_sync_signal_recv: ve_switcher_request_signal_recv,
+            player_to_ui_signal_recv: None,
         })
     }
 
-    async fn init_auto_play(
-        &mut self,
-        player_to_ui_signal_sender: UnboundedSender<PlayerToUISingnal>,
-    ) -> JoinHandle<()> {
+    fn start_player(&mut self, idx: usize) {
+        let (player_to_ui_signal_sender, player_to_ui_signal_recv) = unbounded_channel();
+        self.player_to_ui_signal_recv = Some(player_to_ui_signal_recv);
+
         let app_state_container = &mut self.app_state_container;
 
         let play_list_arc = app_state_container.play_list.clone();
-        app_state_container.play_state = PlayState::Playing(0);
+        app_state_container.play_state = PlayState::Playing(idx);
         let (player_control_signal_sender, mut player_control_signal_recv) = unbounded_channel();
 
-        app_state_container.player_control_singnal_sender = Some(player_control_signal_sender);
-        let player_to_ui_singnal_sender = player_to_ui_signal_sender.clone();
+        //app_state_container.player_control_singnal_sender = Some(player_control_signal_sender);
 
-        tokio::spawn(async move {
-            let Some(first_track) = play_list_arc.first() else {
+        let player_handle = tokio::spawn(async move {
+            let Some(first_track) = play_list_arc.get(idx) else {
                 return;
             };
 
             manipulation::play_executor(
                 first_track,
                 &mut player_control_signal_recv,
-                player_to_ui_singnal_sender,
+                player_to_ui_signal_sender,
             )
             .await;
-        })
+        });
+
+        app_state_container.player_thread = Some(PlayerThread {
+            handle: player_handle,
+            player_control_singnal_sender: player_control_signal_sender,
+        });
     }
 
     async fn ve_sync(ve_read_exclusive: &mut usize) {
@@ -145,34 +155,32 @@ impl App {
     }
 
     pub async fn run(&mut self) -> color_eyre::Result<()> {
-        let (player_to_ui_signal_sender, player_to_ui_singnal_receiver) = unbounded_channel();
-
-        let init_auto_play_handle = self.init_auto_play(player_to_ui_signal_sender).await;
+        self.start_player(0);
 
         self.tui.enter()?;
 
-        self.event_loop(player_to_ui_singnal_receiver).await?;
-
-        if let Some(ref mut sender) = self.app_state_container.player_control_singnal_sender {
-            sender.send(PlayerControlSignal::Stop)?;
-        }
+        self.event_loop().await?;
 
         self.app_state_container.ve_channel = None;
 
-        init_auto_play_handle.await?;
+        if let Some(PlayerThread {
+            handle,
+            player_control_singnal_sender,
+        }) = &mut self.app_state_container.player_thread
+        {
+            player_control_singnal_sender.send(PlayerControlSignal::Stop);
+            handle.await?;
+        }
 
         self.tui.exit()?;
 
         Ok(())
     }
 
-    pub async fn event_loop(
-        &mut self,
-        mut player_to_ui_singnal_receiver: UnboundedReceiver<PlayerToUISingnal>,
-    ) -> color_eyre::Result<()> {
+    pub async fn event_loop(&mut self) -> color_eyre::Result<()> {
         let mut event_stream = EventStream::new();
 
-        let mut ve_switcher_requst_signal: Option<VeSwitcherReeustSignal> = None;
+        let mut ve_switcher_requst_signal: Option<VeSwitcherRequestSignal> = None;
         let mut ve_switcher_sync_signal: Option<VeSwitcherSyncSignal> = None;
 
         'l1: loop {
@@ -225,12 +233,12 @@ impl App {
             };
 
             tokio::select! {
-                signal = player_to_ui_singnal_receiver.recv() => {
-                    match signal{
-                        Some(signal) => self.handle_player_to_ui_signal(signal)?,
-                        None => break 'l1
+                Some(signal) = async{
+                    match self.player_to_ui_signal_recv {
+                        Some(ref mut recv) => recv.recv().await,
+                        None => future::pending().await,
                     }
-                }
+                } => self.handle_player_to_ui_signal(signal).await?,
                 crossterm_event = event_stream.next().fuse() => match crossterm_event {
                     Some(Result::Ok(event)) => self.handle_crossterm_event(&event).await?,
                     _ => break 'l1,
@@ -284,13 +292,27 @@ impl App {
                         },
                         None => {},
                     }
-                }
+                },
+                _ = async{
+                    match  &mut self.app_state_container.player_thread{
+                        Some(PlayerThread { handle, .. }) => handle.await,
+                        None => future::pending().await,
+                    }
+                } => {
+                    self.handle_player_thread_completed();
+
+                    _ = self.render();
+
+                    if let Some(idx) = self.app_state_container.wait_next_tack_idx.take() {
+                        self.start_player(idx);
+                    }
+                },
             };
 
             if let (Some(ref signal), Some(_)) =
                 (ve_switcher_requst_signal, ve_switcher_sync_signal)
             {
-                self.handle_ve_switching(signal.requestTab)?;
+                self.handle_ve_switching(signal.request_tab)?;
                 ve_switcher_requst_signal = None;
                 ve_switcher_sync_signal = None;
             }
@@ -299,9 +321,21 @@ impl App {
         Ok(())
     }
 
+    fn handle_player_thread_completed(&mut self) {
+        self.app_state_container.player_thread = None;
+        self.app_state_container.play_state = PlayState::Stopped;
+        self.app_state_container.playing_track_info = None;
+        self.app_state_container.ve_channel = None;
+        self.app_state_container.ve_shared_buffer = None;
+    }
+
     fn handle_ve_switching(&mut self, target_tab: VeSelectedTab) -> color_eyre::Result<()> {
         let app_state_container = &mut self.app_state_container;
-        let Some(sender) = &app_state_container.player_control_singnal_sender else {
+        let Some(PlayerThread {
+            player_control_singnal_sender: sender,
+            ..
+        }) = &app_state_container.player_thread
+        else {
             return Ok(());
         };
         match target_tab {
@@ -335,7 +369,10 @@ impl App {
         Ok(())
     }
 
-    fn handle_player_to_ui_signal(&mut self, signal: PlayerToUISingnal) -> color_eyre::Result<()> {
+    async fn handle_player_to_ui_signal(
+        &mut self,
+        signal: PlayerToUISingnal,
+    ) -> color_eyre::Result<()> {
         let playing_tarck_info = &mut self.app_state_container.playing_track_info;
         match signal {
             PlayerToUISingnal::NoticeTrackInfo(track_info) => {
@@ -344,6 +381,15 @@ impl App {
                     track_info.audio_device_sample_rate,
                     track_info.track_duration,
                 ));
+
+                let target_tab = self.app_state_container.ve_selected;
+                if target_tab != VeSelectedTab::Off {
+                    self.app_state_container
+                        .ve_switcher_request_signal_sender
+                        .send(VeSwitcherRequestSignal {
+                            request_tab: target_tab,
+                        });
+                }
 
                 self.render()?;
             }
@@ -384,19 +430,48 @@ impl App {
                 _ = self
                     .ve_switcher_sync_signal_sender
                     .send(VeSwitcherSyncSignal());
-                info!("ve_disabled_sync_ui_recved");
             }
             PlayerToUISingnal::VeEnabledSync => {
                 _ = self
                     .ve_switcher_sync_signal_sender
                     .send(VeSwitcherSyncSignal());
-                info!("ve_Enabled_sync_ui_recved");
+            }
+            // PlayerToUISingnal::PlayCompleted => {
+            //     if let Some(PlayerThread {
+            //         player_control_singnal_sender,
+            //         ..
+            //     }) = &mut self.app_state_container.player_thread
+            //     {
+            //         _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
+            //     }
+            //     self.app_state_container.play_state = PlayState::Stopped;
+            //     self.app_state_container.playing_track_info = None;
+            //     self.app_state_container.ve_channel = None;
+
+            //     _ = self.render();
+            // }
+            PlayerToUISingnal::EndOfStream => 'b1: {
+                let next_idx = match self.app_state_container.play_state {
+                    PlayState::Playing(idx) | PlayState::Paused(idx) => idx + 1,
+                    _ => break 'b1,
+                };
+
+                self.app_state_container.wait_next_tack_idx = Some(next_idx);
+            }
+            PlayerToUISingnal::RendererPlayCompleted => 'b1: {
+                let Some(PlayerThread {
+                    ref mut player_control_singnal_sender,
+                    ..
+                }) = self.app_state_container.player_thread else {
+                    break 'b1;
+                };
+                player_control_singnal_sender.send(PlayerControlSignal::Stop);
             }
         }
         Ok(())
     }
 
-    fn handle_key_event(&mut self, key: KeyEvent) -> color_eyre::Result<()> {
+    async fn handle_key_event(&mut self, key: KeyEvent) -> color_eyre::Result<()> {
         use AppState::AppState::*;
 
         let mut move_key_pressed_handler = |key_code: KeyCode| {
@@ -421,8 +496,15 @@ impl App {
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            } => {
+            } => 'b1: {
                 self.event_loop_canceled = true;
+                if let Some(PlayerThread {
+                    player_control_singnal_sender,
+                    ..
+                }) = &self.app_state_container.player_thread
+                {
+                    _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
+                }
             }
             KeyEvent {
                 code,
@@ -467,7 +549,7 @@ impl App {
 
     async fn handle_crossterm_event(&mut self, event: &CrosstermEvent) -> color_eyre::Result<()> {
         match event {
-            CrosstermEvent::Key(key) => self.handle_key_event(*key)?,
+            CrosstermEvent::Key(key) => self.handle_key_event(*key).await?,
             CrosstermEvent::Resize(w, h) => self.handle_resize(*w, *h)?,
             _ => {}
         }

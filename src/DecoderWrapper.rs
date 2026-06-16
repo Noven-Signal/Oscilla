@@ -1,11 +1,15 @@
 use std::error::Error;
 use std::fmt::{self, Display};
+use std::path::Path;
 use std::time::Duration;
 
 use symphonia::core::audio::{AsAudioBufferRef, AudioBufferRef, Signal};
 use symphonia::core::codecs::{CodecParameters, Decoder, DecoderOptions};
 
 use symphonia::core::formats::{FormatReader, Packet};
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::probe::Hint;
+use symphonia::default::get_probe;
 use tracing::info;
 
 /// Options for the decode command.
@@ -17,6 +21,7 @@ pub struct DecoderOptionsAndTrackNum {
 
 #[derive(Debug)] // Required for Debug trait
 pub enum DecodeInitError {
+    FileOpenFailed,
     NoTrackFound,
 }
 
@@ -45,7 +50,35 @@ pub enum DecodeResult<'a> {
 }
 
 impl DecoderWrapper {
-    pub fn new(reader: Box<dyn FormatReader>) -> Result<Self, DecodeInitError> {
+    fn open_file(path: &str) -> Result<Box<dyn FormatReader>, DecodeInitError> {
+        let probe = get_probe();
+        use std::fs::File;
+        let Ok(file) = File::open(path) else {
+            return Err(DecodeInitError::FileOpenFailed);
+        };
+        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+        let mut hint = Hint::new();
+        let extension = match Path::extension(Path::new(path)) {
+            Some(os_str) => match os_str.to_str() {
+                Some(str) => str,
+                None => "",
+            },
+            None => "",
+        };
+        hint.with_extension(extension);
+        let probe_result = probe.format(&hint, mss, &Default::default(), &Default::default());
+        let format_reader = match probe_result {
+            Ok(res) => res.format,
+            Err(_) => todo!(),
+        };
+
+        Ok(format_reader)
+    }
+
+    pub fn new(path: &str) -> Result<Self, DecodeInitError> {
+        let reader = Self::open_file(path)?;
+
         let track = reader
             .default_track()
             .ok_or_else(|| DecodeInitError::NoTrackFound)?;

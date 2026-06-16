@@ -7,6 +7,7 @@ use tracing::info;
 use crate::{
     DecoderWrapper::{DecodeResult, DecoderWrapper},
     ResamplerWrapper::{self, RsamplerWrapper},
+    app::PlayerToUISingnal,
     manipulation::{
         CHANNEL, DecoderControlSignal, DecoderToRendererSyncSignal, DecorderToVeSyncSignal,
         EndOfStreamSignal, NUM_OF_BLOCK, RendererToDecoderSsynSignal, SampleRate, SharedBuffer,
@@ -26,6 +27,7 @@ pub fn decode_loop(
     mut renderer_to_decoder_singal_recv: UnboundedReceiver<RendererToDecoderSsynSignal>,
     mut decoder_control_signal: UnboundedReceiver<DecoderControlSignal>,
     decoder_to_player_notification_signal: UnboundedSender<WorkerToPlayerNotification>,
+    player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
 ) {
     struct VeSignal {
         pub decoder_to_ve_signal_sender: UnboundedSender<DecorderToVeSyncSignal>,
@@ -64,9 +66,33 @@ pub fn decode_loop(
             )
         };
 
+    let mem_copy_with_sample_rate_conversion =
+        |target_buffer: &mut [Vec<f32>; 2], resample_container: &mut Option<ResampleContainer>| {
+            let Some(ResampleContainer {
+                decode_tmp_block,
+                resampler_wrapper,
+                block_size,
+            }) = resample_container
+            else {
+                return;
+            };
+
+            // for ch in 0..CHANNEL {
+            //     target_buffer[ch].resize(*block_size, 0f32);
+            // }
+
+            let [target_buffer_ch_0, target_buffer_ch_1] = target_buffer;
+
+            resampler_wrapper.proc(
+                &[0, 1].map(|x| decode_tmp_block[x].as_slice()),
+                &mut [target_buffer_ch_0, target_buffer_ch_1],
+            );
+        };
+
     let mut write_exclusive: usize = 0;
-    let mut count = 0;
     let mut head: usize = 0;
+
+    let mut end_of_stream_reached = false;
 
     let mut block_count: usize = 0;
 
@@ -101,7 +127,6 @@ pub fn decode_loop(
 
             let decode_tmp_block = (base * multiple * 100) as usize;
 
-
             Some(ResampleContainer {
                 decode_tmp_block: array_init(|| vec![0f32; decode_tmp_block]),
                 resampler_wrapper: RsamplerWrapper::new(
@@ -115,15 +140,16 @@ pub fn decode_loop(
             })
         };
 
-    let mut type_conversion_buff: [Vec<f32>; CHANNEL] = array_init(|| {
-        vec![
-            0f32;
-            match resample_container {
-                Some(ref x) => x.block_size,
-                None => BLOCK_SIZE_DEFAULT,
-            }
-        ]
-    });
+    let get_block_size = || match resample_container {
+        Some(ref x) => x.block_size,
+        None => BLOCK_SIZE_DEFAULT,
+    };
+
+    let mut type_conversion_buff: [Vec<f32>; CHANNEL] = array_init(|| vec![0f32; get_block_size()]);
+
+    for i in 0..shared_buffer.len() {
+        shared_buffer[i] = array_init(|| vec![0f32; get_block_size()]);
+    }
 
     macro_rules! get_exclusizebuff {
         () => {
@@ -147,7 +173,7 @@ pub fn decode_loop(
                 BLOCK_SIZE_DEFAULT
             }
         };
-        if !decoder_control_signal.is_empty() {
+        if end_of_stream_reached || !decoder_control_signal.is_empty() {
             match decoder_control_signal.blocking_recv() {
                 Some(DecoderControlSignal::Stop) => {
                     _ = singnal_to_thread_sync(
@@ -228,32 +254,6 @@ pub fn decode_loop(
                     copy_buff(exclusive_buff[ch].as_mut_slice(), view[ch]);
                 }
             };
-
-            let mem_copy_with_sample_rate_conversion =
-                |target_buffer: &mut [Vec<f32>; 2],
-                 resample_container: &mut Option<ResampleContainer>| {
-                    if let Some(ResampleContainer {
-                        decode_tmp_block,
-                        resampler_wrapper,
-                        block_size,
-                    }) = resample_container
-                    {
-                        for ch in 0..CHANNEL {
-                            target_buffer[ch].resize(*block_size, 0f32);
-                        }
-
-                        let [target_buffer_ch_0, target_buffer_ch_1] = target_buffer;
-
-                        resampler_wrapper.proc(
-                            &[0, 1].map(|x| decode_tmp_block[x].as_slice()),
-                            &mut [target_buffer_ch_0, target_buffer_ch_1],
-                        );
-
-                        info!("target_len_a: {}", target_buffer_ch_0[target_buffer_ch_0.len() - 2000]);
-                        info!("target_len_b: {}", target_buffer_ch_0[target_buffer_ch_0.len() - 1000 ]);
-                        info!("target_len_c: {}", target_buffer_ch_0[target_buffer_ch_0.len() - 300]);
-                    }
-                };
 
             let target_len = head + view[0].len();
             let threshold_len = if let Some(ref x) = resample_container {
@@ -354,22 +354,31 @@ pub fn decode_loop(
                 //println!("error: {error}")
             }
             DecodeResult::EndOfStream => {
-                for channel_data_ref in &mut shared_buffer[write_exclusive] {
-                    channel_data_ref[head..].fill(0f32);
-                }
+                // for channel_data_ref in &mut shared_buffer[write_exclusive] {
+                //     channel_data_ref[head..].fill(0f32);
+                // }
+
+                mem_copy_with_sample_rate_conversion(
+                    &mut shared_buffer[write_exclusive],
+                    &mut resample_container,
+                );
 
                 _ = singnal_to_thread(
                     &mut renderer_to_decoder_singal_recv,
                     &mut ve_signal,
                     DecoderToRendererSyncSignal::EndOfStream(EndOfStreamSignal {
                         last_block: write_exclusive,
+                        filled_len: head,
                     }),
                 );
-                break 'l1;
+
+                write_exclusive = next_block(write_exclusive);
+
+                player_to_ui_singnal_sender.send(PlayerToUISingnal::EndOfStream);
+
+                end_of_stream_reached = true;
             }
             DecodeResult::None => continue,
         }
-
-        count = count + 1;
     }
 }

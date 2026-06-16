@@ -1,6 +1,7 @@
 use core::panic;
 use core::result::Result::Ok;
 use std::cmp;
+use std::thread::sleep;
 use std::time::{Duration, SystemTime};
 
 use imp::CreateEventW;
@@ -8,6 +9,7 @@ use ratatui::symbols::block;
 use std::ops::Range;
 use std::ptr::null;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tracing::info;
 
 use windows::Win32::Foundation::{HANDLE, WAIT_EVENT};
 use windows::Win32::System::Threading::{INFINITE, WaitForSingleObject};
@@ -18,7 +20,9 @@ use windows::{
 
 use crate::app::{PlayedFrames, PlayerToUISingnal};
 use crate::manipulation::{
-    AUDIO_OUTPUT_BUFFER_DURATION, AudioDeviceInfo, CHANNEL, DecoderToRendererSyncSignal, EndOfStreamSignal, NUM_OF_BLOCK, RendererControlSignal, RendererToDecoderSsynSignal, SharedBuffer, WorkerToPlayerNotification
+    AUDIO_OUTPUT_BUFFER_DURATION, AudioDeviceInfo, CHANNEL, DecoderToRendererSyncSignal,
+    EndOfStreamSignal, NUM_OF_BLOCK, RendererControlSignal, RendererToDecoderSsynSignal,
+    SharedBuffer, WorkerToPlayerNotification,
 };
 
 pub fn main(
@@ -27,7 +31,7 @@ pub fn main(
     decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderToRendererSyncSignal>,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
-    worker_to_player_notofication_signal_sender: UnboundedSender<WorkerToPlayerNotification>
+    worker_to_player_notofication_signal_sender: UnboundedSender<WorkerToPlayerNotification>,
 ) -> Result<()> {
     unsafe {
         let mut audio_output = AudioOutput::new(
@@ -38,9 +42,7 @@ pub fn main(
             player_to_ui_singnal_sender,
         )?;
 
-        let wave_format_ptr = audio_output.audio_client.GetMixFormat()?;
-
-        let wave_format: WAVEFORMATEX = *wave_format_ptr;
+        let wave_format = get_waveformat_ex(&audio_output.audio_client)?;
         worker_to_player_notofication_signal_sender.send(
             WorkerToPlayerNotification::NoticeAudioDeviceInfo(AudioDeviceInfo {
                 sample_rate: wave_format.nSamplesPerSec as usize,
@@ -52,6 +54,13 @@ pub fn main(
     Ok(())
 }
 
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn get_waveformat_ex(audio_client: &IAudioClient) -> Result<WAVEFORMATEX> {
+    let wave_format_ptr = audio_client.GetMixFormat()?;
+
+    Ok(*wave_format_ptr)
+}
+
 struct AudioOutput<'a> {
     audio_client: IAudioClient,
     render_client: IAudioRenderClient,
@@ -61,7 +70,7 @@ struct AudioOutput<'a> {
     renderer_to_decoder_singal_sender: UnboundedSender<RendererToDecoderSsynSignal>,
     decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderToRendererSyncSignal>,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
-    player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>
+    player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
 }
 
 impl<'a> AudioOutput<'a> {
@@ -92,13 +101,25 @@ impl<'a> AudioOutput<'a> {
             decoder_to_renderer_singal_recv,
             wasapi_event_hanle: handle,
             control_signal_receiver,
-            player_to_ui_singnal_sender
+            player_to_ui_singnal_sender,
         })
     }
     #[allow(unsafe_op_in_unsafe_fn)]
     unsafe fn start(&mut self) -> Result<()> {
         self.audio_client.Start()?;
         self.render_loop()?;
+        Ok(())
+    }
+
+    #[allow(unsafe_op_in_unsafe_fn)]
+    unsafe fn wait_for_wasapi_event(wasapi_event_hanle: HANDLE) -> Result<()> {
+        match WaitForSingleObject(wasapi_event_hanle, INFINITE) {
+            windows::Win32::Foundation::WAIT_OBJECT_0 => {}
+            WAIT_EVENT(val) => {
+                return Err(Error::new(HRESULT(val as i32), "wating event error"));
+            }
+        };
+
         Ok(())
     }
 
@@ -158,10 +179,16 @@ impl<'a> AudioOutput<'a> {
             read_exclusive => read_exclusive + 1,
         };
 
-        let mut end_of_stream_block: Option<usize> = None;
+        #[derive(Clone, Copy)]
+        struct EndOfStreamBlockInfo {
+            block_idx: usize,
+            filled_len: usize,
+        }
+
+        let mut end_of_stream_block: Option<EndOfStreamBlockInfo> = None;
         let mut head: usize = 0;
         let mut read_exclusive: usize = 0;
-        let mut count = 0;
+        // let mut count = 0;
         let mut vol = 1f32;
 
         enum SendSignalResult {
@@ -169,27 +196,34 @@ impl<'a> AudioOutput<'a> {
             EndOfStream,
         }
 
-        let mut singnal_to_thread = |read_exclusive: usize| {
-            match self.decoder_to_renderer_singal_recv.blocking_recv() {
-                Some(DecoderToRendererSyncSignal::Sync) => {}
-                Some(DecoderToRendererSyncSignal::EndOfStream(EndOfStreamSignal {
-                    last_block,
-                })) => {
-                    end_of_stream_block = Some(last_block);
+        let mut singnal_to_thread =
+            |read_exclusive: usize, end_of_stream_block: &mut Option<EndOfStreamBlockInfo>| {
+                match self.decoder_to_renderer_singal_recv.blocking_recv() {
+                    Some(DecoderToRendererSyncSignal::Sync) => {}
+                    Some(DecoderToRendererSyncSignal::EndOfStream(EndOfStreamSignal {
+                        last_block,
+                        filled_len,
+                    })) => {
+                        *end_of_stream_block = Some(EndOfStreamBlockInfo {
+                            block_idx: last_block,
+                            filled_len,
+                        });
+                    }
+                    None => {}
                 }
-                None => {}
-            }
 
-            self.renderer_to_decoder_singal_sender
-                .send(RendererToDecoderSsynSignal());
+                self.renderer_to_decoder_singal_sender
+                    .send(RendererToDecoderSsynSignal());
 
-            match end_of_stream_block {
-                Some(block) if block == next_block(read_exclusive) => SendSignalResult::EndOfStream,
-                _ => SendSignalResult::OK,
-            }
-        };
+                match end_of_stream_block {
+                    Some(block) if block.block_idx == next_block(read_exclusive) => {
+                        SendSignalResult::EndOfStream
+                    }
+                    _ => SendSignalResult::OK,
+                }
+            };
 
-        _ = singnal_to_thread(read_exclusive);
+        _ = singnal_to_thread(read_exclusive, &mut end_of_stream_block);
         'l1: loop {
             let get_block_len = |read_exclusive: usize| self.shared_buffer[read_exclusive][0].len();
 
@@ -217,19 +251,14 @@ impl<'a> AudioOutput<'a> {
                     }
                     Some(RendererControlSignal::Stop) => {
                         _ = self.audio_client.Stop();
-                        _ = singnal_to_thread(read_exclusive);
+                        _ = singnal_to_thread(read_exclusive, &mut end_of_stream_block);
                         break 'l1;
                     }
                     _ => break 'l1,
                 }
             }
 
-            match WaitForSingleObject(self.wasapi_event_hanle, INFINITE) {
-                windows::Win32::Foundation::WAIT_OBJECT_0 => {}
-                WAIT_EVENT(val) => {
-                    return Err(Error::new(HRESULT(val as i32), "wating event error"));
-                }
-            };
+            Self::wait_for_wasapi_event(self.wasapi_event_hanle)?;
             //tokio::time::sleep(Duration::from_millis(10)).await;
 
             let padding = self.audio_client.GetCurrentPadding()?;
@@ -275,7 +304,9 @@ impl<'a> AudioOutput<'a> {
                 Equal => {
                     fill_buff_within_block();
 
-                    if let SendSignalResult::EndOfStream = singnal_to_thread(read_exclusive) {
+                    if let SendSignalResult::EndOfStream =
+                        singnal_to_thread(read_exclusive, &mut end_of_stream_block)
+                    {
                         break 'l1;
                     }
 
@@ -296,9 +327,7 @@ impl<'a> AudioOutput<'a> {
                         }
                     }
 
-                    if let SendSignalResult::EndOfStream = singnal_to_thread(read_exclusive) {
-                        break 'l1;
-                    }
+                    let res = singnal_to_thread(read_exclusive, &mut end_of_stream_block);
 
                     read_exclusive = next_block(read_exclusive);
 
@@ -327,17 +356,57 @@ impl<'a> AudioOutput<'a> {
                 }
             };
 
-            self.render_client.ReleaseBuffer(available as u32, 0)?;
-            count = count + 1;
+            let (actual_write_frames, this_iter_is_end_of_stream) = match end_of_stream_block {
+                Some(EndOfStreamBlockInfo {
+                    block_idx,
+                    filled_len,
+                }) if block_idx == read_exclusive => {
+                    let min = cmp::min(available, filled_len);
+                    (min, head <= filled_len)
+                }
+                _ => (available, false),
+            };
+
+            self.render_client
+                .ReleaseBuffer(actual_write_frames as u32, 0)?;
+
             self.player_to_ui_singnal_sender
                 .send(PlayerToUISingnal::PlayedFrames(PlayedFrames {
                     frames: (available as u32),
                     buffered_frames: padding as u32,
                 }));
+
+            if this_iter_is_end_of_stream {
+                let sample_rate = get_waveformat_ex(&self.audio_client)?.nSamplesPerSec;
+                let current_padding = self.audio_client.GetCurrentPadding()?;
+                let buffered_duration =
+                    Duration::from_secs_f64(current_padding as f64 / sample_rate as f64);
+                info!("buffered_duration: {}", buffered_duration.as_secs_f32());
+
+                'l2: loop {
+                    Self::wait_for_wasapi_event(self.wasapi_event_hanle)?;
+                    let padding = self.audio_client.GetCurrentPadding()?;
+
+
+                    self.player_to_ui_singnal_sender
+                        .send(PlayerToUISingnal::PlayedFrames(PlayedFrames {
+                            frames: (0u32),
+                            buffered_frames: padding as u32,
+                        }));
+                    
+                    if padding == 0 {
+                        break 'l2;
+                    }
+                }
+                break 'l1;
+            }
         }
 
-        //sleep(Duration::from_millis(500));
-        self.audio_client.Stop()?;
+        _ = self.audio_client.Stop();
+
+        _ = self
+            .player_to_ui_singnal_sender
+            .send(PlayerToUISingnal::RendererPlayCompleted);
 
         Ok(())
     }

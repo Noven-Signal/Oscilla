@@ -9,7 +9,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, LineGauge};
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
-use crate::AppState::AppState::{AppStateContainer, AreaHandler, TabState, Tabs};
+use crate::AppState::AppState::{AppStateContainer, AreaHandler, PlayerThread, TabState, Tabs};
 use crate::extensions::OnceLock::OnceLock_ext;
 
 #[derive(Default)]
@@ -44,7 +44,7 @@ impl AreaHandler for VolArea {
         let move_quantity: i16 = match key_code {
             KeyCode::Up | KeyCode::Right => 1,
             KeyCode::Down | KeyCode::Left => -1,
-            _ => return
+            _ => return,
         };
         let after = app_state_continer.vol_state as i16 + move_quantity;
         let after = match after {
@@ -53,8 +53,12 @@ impl AreaHandler for VolArea {
             x => x,
         };
         app_state_continer.vol_state = after as u16;
-        if let Some(ref mut sender) = app_state_continer.player_control_singnal_sender {
-            sender.send(PlayerControlSignal::SetVol(after as u16));
+        if let Some(PlayerThread {
+            player_control_singnal_sender,
+            ..
+        }) = &mut app_state_continer.player_thread
+        {
+            player_control_singnal_sender.send(PlayerControlSignal::SetVol(after as u16));
         }
     }
 }

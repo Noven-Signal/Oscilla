@@ -79,9 +79,6 @@ impl RsamplerWrapper {
             input_frames_next = self.resampler.input_frames_next();
         }
 
-        info!("input_frames_left: {}", input_frames_left);
-        info!("input_frames_next: {}", input_frames_next);
-
         Ok(())
     }
 }
