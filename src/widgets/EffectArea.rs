@@ -132,6 +132,9 @@ impl AreaHandler for EffectArea {
         }
         *ve_selected = target_tab;
 
+        let Some(_)  = app_state_container.playing_track_info else {
+            return;
+        };
         app_state_container.ve_switcher_request_signal_sender.send(VeSwitcherRequestSignal{ request_tab: target_tab});
     }
 }

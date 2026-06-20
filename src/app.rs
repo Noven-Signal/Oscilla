@@ -123,9 +123,10 @@ impl App {
     }
 
     fn start_player(&mut self, idx: usize) {
-        if let Some(_) = self.app_state_container.player_thread{
+        if let Some(_) = self.app_state_container.player_thread {
             return;
         }
+
         let (player_to_ui_signal_sender, player_to_ui_signal_recv) = unbounded_channel();
         self.player_to_ui_signal_recv = Some(player_to_ui_signal_recv);
 
@@ -245,10 +246,35 @@ impl App {
                 }
             };
 
+            macro_rules! before_start_player_clean_up_statement {
+                () => {
+                    self.player_to_ui_signal_recv = None;
+
+                    async fn drain_all_signal<T>(reciever: &mut UnboundedReceiver<T>) {
+                        while !reciever.is_empty() {
+                            reciever.recv().await;
+                        }
+                    }
+                    drain_all_signal(&mut self.app_state_container.ve_switcher_request_signal_recv)
+                        .await;
+                    drain_all_signal(&mut self.ve_switcher_sync_signal_recv).await;
+
+                    ve_switcher_requst_signal = None;
+                    ve_switcher_sync_signal = None;
+                    _ = self
+                        .ve_switcher_sync_signal_sender
+                        .send(VeSwitcherSyncSignal());
+                };
+            }
+
             tokio::select! {
                 Some(signal) = self.app_control_signal_recv.recv() => {
                     match signal {
-                        AppContorlSignal::StartPlayer(idx) => self.start_player(idx),
+                        AppContorlSignal::StartPlayer(idx) => {
+                           before_start_player_clean_up_statement!();
+
+                            self.start_player(idx);
+                        },
                     }
                 }
                 Some(signal) = async{
@@ -312,7 +338,7 @@ impl App {
                     }
                 },
                 _ = async{
-                    match  &mut self.app_state_container.player_thread{
+                    match &mut self.app_state_container.player_thread{
                         Some(PlayerThread { handle, .. }) => handle.await,
                         None => future::pending().await,
                     }
@@ -320,6 +346,8 @@ impl App {
                     self.handle_player_thread_completed();
 
                     _ = self.render();
+
+                    before_start_player_clean_up_statement!();
 
                     if let Some(idx) = self.app_state_container.wait_next_tack_idx.take() {
                         self.start_player(idx);
