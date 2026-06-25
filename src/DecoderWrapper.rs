@@ -8,7 +8,8 @@ use symphonia::core::codecs::{CodecParameters, Decoder, DecoderOptions};
 
 use symphonia::core::formats::{FormatReader, Packet};
 use symphonia::core::io::MediaSourceStream;
-use symphonia::core::probe::Hint;
+use symphonia::core::meta::{Metadata, Tag};
+use symphonia::core::probe::{Hint, ProbeResult};
 use symphonia::default::get_probe;
 use tracing::info;
 
@@ -38,7 +39,7 @@ impl Display for DecodeInitError {
 impl Error for DecodeInitError {}
 
 pub struct DecoderWrapper {
-    reader: Box<dyn FormatReader>,
+    probe_result: ProbeResult,
     decoder: Box<dyn Decoder>,
     track_id: u32,
 }
@@ -50,7 +51,7 @@ pub enum DecodeResult<'a> {
 }
 
 impl DecoderWrapper {
-    fn open_file(path: &str) -> Result<Box<dyn FormatReader>, DecodeInitError> {
+    fn open_file(path: &str) -> Result<ProbeResult, DecodeInitError> {
         let probe = get_probe();
         use std::fs::File;
         let Ok(file) = File::open(path) else {
@@ -67,17 +68,18 @@ impl DecoderWrapper {
             None => "",
         };
         hint.with_extension(extension);
-        let probe_result = probe.format(&hint, mss, &Default::default(), &Default::default());
-        let format_reader = match probe_result {
-            Ok(res) => res.format,
-            Err(_) => todo!(),
-        };
 
-        Ok(format_reader)
+        let probe_result = probe
+            .format(&hint, mss, &Default::default(), &Default::default())
+            .map_err(|_| DecodeInitError::FileOpenFailed)?;
+
+        Ok(probe_result)
     }
 
     pub fn new(path: &str) -> Result<Self, DecodeInitError> {
-        let reader = Self::open_file(path)?;
+        let probe_result = Self::open_file(path)?;
+
+        let reader = &probe_result.format;
 
         let track = reader
             .default_track()
@@ -89,14 +91,14 @@ impl DecoderWrapper {
 
         let track_id = track.id;
         Ok(Self {
-            reader,
+            probe_result,
             decoder,
             track_id,
         })
     }
 
     pub fn decode(&'_ mut self) -> DecodeResult<'_> {
-        let packet = match self.reader.next_packet() {
+        let packet = match self.probe_result.format.next_packet() {
             Ok(p) => p,
             Err(symphonia::core::errors::Error::IoError(err)) => {
                 //temp EndOfStream
@@ -118,7 +120,8 @@ impl DecoderWrapper {
     fn get_codec_params(&self) -> Option<&CodecParameters> {
         Some(
             &self
-                .reader
+                .probe_result
+                .format
                 .tracks()
                 .iter()
                 .filter(|track| track.id == self.track_id)
@@ -142,5 +145,28 @@ impl DecoderWrapper {
     pub fn get_sample_rate(&self) -> Option<u32> {
         let params = self.get_codec_params()?;
         params.sample_rate
+    }
+
+    pub fn extract_file_info_map_into<T>(&mut self, f: impl FnOnce(&[Tag]) -> T) -> T {
+        let mut meta_data = self.probe_result.metadata.get();
+
+        let tags_container = match meta_data {
+            Some(ref mut meta_data) => Self::get_tags_from_meta_data(meta_data),
+            None => &[],
+        };
+
+        let mut meta_data = self.probe_result.format.metadata();
+        let tags_format = Self::get_tags_from_meta_data(&mut meta_data);
+
+        let tags_both_from_container_format = [tags_container, tags_format].concat();
+
+        f(tags_both_from_container_format.as_slice())
+    }
+
+    fn get_tags_from_meta_data<'a>(meta_data: &'a mut Metadata<'a>) -> &'a [Tag] {
+        match meta_data.current() {
+            Some(current) => current.tags(),
+            None => &[],
+        }
     }
 }

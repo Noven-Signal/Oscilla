@@ -4,6 +4,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, List, ListDirection, ListItem, ListState, Widget};
 
 use crate::AppState::AppState::{AppStateContainer, AreaHandler, PlayerThread};
+use crate::AudioFileInfo::AudioFileInfo;
 use crate::app::AppContorlSignal;
 use crate::extensions::OnceLock::OnceLock_ext;
 use crate::extensions::Rect::RectExtension;
@@ -21,7 +22,7 @@ impl StatefulWidget for ListArea {
         let block = get_decorated_border!(state.focus_state, Tabs::ListArea);
 
         // let list = List::new(*play_list_mutex.iter().map(|s| ListItem::new(s.as_str())));
-        let items = state.play_list.iter().map(|x| x.as_str());
+        let items = state.play_list.iter().map(|x| x.get_disp_name().as_str());
 
         let list = List::new(items)
             .style(Color::White)
@@ -54,6 +55,7 @@ impl AreaHandler for ListArea {
                     ..
                 }) = &mut app_state_container.player_thread
                 {
+                    app_state_container.ve_channel = None;
                     app_state_container.wait_next_tack_idx = Some(idx);
                     _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
                 } else {

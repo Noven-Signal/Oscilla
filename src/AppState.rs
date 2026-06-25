@@ -1,14 +1,15 @@
 pub mod AppState {
     use std::ops::Index;
     use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+    use std::time::{Duration, SystemTime};
 
     use crossterm::event::KeyCode;
     use ratatui::widgets::ListState;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tokio::task::JoinHandle;
+    use tokio::task::JoinHandle;
 
     use crate::AppState::AppState::VeSelectedTab::Oscilloscope;
+    use crate::AudioFileInfo::AudioFileInfo;
     use crate::app::{AppContorlSignal, Ves};
     use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
@@ -258,7 +259,7 @@ use tokio::task::JoinHandle;
         pub request_tab: VeSelectedTab,
     }
 
-    pub struct PlayerThread{
+    pub struct PlayerThread {
         pub handle: JoinHandle<()>,
         pub player_control_singnal_sender: UnboundedSender<PlayerControlSignal>,
     }
@@ -268,7 +269,7 @@ use tokio::task::JoinHandle;
         pub focus_state: TabState,
         pub button_focus_state: ButtonIdent,
         pub vol_state: u16,
-        pub play_list: Arc<Vec<String>>,
+        pub play_list: Arc<Vec<AudioFileInfo>>,
         pub play_list_selected: ListState,
         pub play_state: PlayState,
         pub playing_track_info: Option<PlayingTrackInfo>,
@@ -279,17 +280,25 @@ use tokio::task::JoinHandle;
         pub ve_switcher_request_signal_sender: UnboundedSender<VeSwitcherRequestSignal>,
         pub ve_switcher_request_signal_recv: UnboundedReceiver<VeSwitcherRequestSignal>,
         pub wait_next_tack_idx: Option<usize>,
-        pub app_control_signal_sender: UnboundedSender<AppContorlSignal>
+        pub app_control_signal_sender: UnboundedSender<AppContorlSignal>,
     }
 
     impl AppStateContainer {
-        pub fn new(app_control_signal_sender: UnboundedSender<AppContorlSignal>, list: Vec<String>) -> Self {
+        pub fn new(
+            app_control_signal_sender: UnboundedSender<AppContorlSignal>,
+            list: Vec<String>,
+        ) -> Self {
             let (ve_switcher_request_signal_sender, ve_switcher_request_signal_recv) =
                 unbounded_channel();
+            let play_list = list
+                .iter()
+                .map(|path| AudioFileInfo::new(path)) // comment to prevent formatter to single liner
+                .collect();
+
             Self {
                 focus_state: TabState::None,
                 button_focus_state: ButtonIdent::PlayOrPause(PlayButtonState::Playing),
-                play_list: Arc::new(list),
+                play_list: Arc::new(play_list),
                 vol_state: 100,
                 play_list_selected: ListState::default(),
                 play_state: PlayState::Stopped,
@@ -301,7 +310,7 @@ use tokio::task::JoinHandle;
                 ve_switcher_request_signal_sender,
                 ve_switcher_request_signal_recv,
                 wait_next_tack_idx: None,
-                app_control_signal_sender
+                app_control_signal_sender,
             }
         }
     }

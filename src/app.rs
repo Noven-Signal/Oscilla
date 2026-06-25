@@ -139,12 +139,12 @@ impl App {
         //app_state_container.player_control_singnal_sender = Some(player_control_signal_sender);
         let init_vol = app_state_container.vol_state;
         let player_handle = tokio::spawn(async move {
-            let Some(first_track) = play_list_arc.get(idx) else {
+            let Some(target_track) = play_list_arc.get(idx) else {
                 return;
             };
 
             manipulation::play_executor(
-                first_track,
+                &target_track.file_path,
                 init_vol,
                 &mut player_control_signal_recv,
                 player_to_ui_signal_sender,

@@ -28,6 +28,7 @@ mod tui;
 mod utils;
 mod visual_effects;
 mod widgets;
+mod AudioFileInfo;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
