@@ -1,11 +1,15 @@
+use std::borrow::Cow;
+
 use crossterm::event::Event::Key;
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, List, ListDirection, ListItem, ListState, Widget};
+use ratatui::style::{Color, Style};
+use ratatui::widgets::{Block, HighlightSpacing, List, ListDirection, ListItem, ListState, Widget};
+use tracing_subscriber::fmt::format;
 
 use crate::AppState::AppState::{AppStateContainer, AreaHandler, PlayerThread};
 use crate::AudioFileInfo::AudioFileInfo;
-use crate::app::AppContorlSignal;
+use crate::app::{App, AppContorlSignal};
 use crate::extensions::OnceLock::OnceLock_ext;
 use crate::extensions::Rect::RectExtension;
 use crate::manipulation::*;
@@ -21,13 +25,29 @@ impl StatefulWidget for ListArea {
 
         let block = get_decorated_border!(state.focus_state, Tabs::ListArea);
 
-        // let list = List::new(*play_list_mutex.iter().map(|s| ListItem::new(s.as_str())));
-        let items = state.play_list.iter().map(|x| x.get_disp_name().as_str());
+        let items = state.play_list.iter().enumerate().map(|(i, x)| {
+            let name = x.get_disp_name();
+            let is_selected_item = state.play_list_selected.selected().is_some_and(|x| x == i);
+            use PlayState::*;
+            match state.play_state {
+                Playing(idx) | Paused(idx) if idx == i => ListItem::new(
+                    Span::raw(format!("♬  {name}")).style(match is_selected_item {
+                        true => Color::Yellow,
+                        false => Color::Magenta,
+                    }),
+                ),
+                _ if is_selected_item => ListItem::new(
+                    Span::raw("> ").style(Color::Red) + Span::raw(name).style(Color::Yellow),
+                ),
+                _ => ListItem::new(name),
+            }
+        });
 
         let list = List::new(items)
             .style(Color::White)
-            .highlight_style(Style::new().yellow().italic())
-            .highlight_symbol("> ".red())
+            //.highlight_style(Style::new().yellow().italic())
+            .highlight_spacing(HighlightSpacing::Never)
+            //.highlight_symbol("> ".red())
             .scroll_padding(1)
             .direction(ListDirection::TopToBottom)
             .repeat_highlight_symbol(true);
@@ -50,21 +70,13 @@ impl AreaHandler for ListArea {
                 let Some(idx) = app_state_container.play_list_selected.selected() else {
                     break 'b1;
                 };
-                if let Some(PlayerThread {
-                    player_control_singnal_sender,
-                    ..
-                }) = &mut app_state_container.player_thread
-                {
-                    app_state_container.ve_channel = None;
-                    app_state_container.wait_next_tack_idx = Some(idx);
-                    _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
-                } else {
-                    _ = app_state_container
-                        .app_control_signal_sender
-                        .send(AppContorlSignal::StartPlayer(idx));
-                };
+                App::play_track(app_state_container, idx);
             }
             _ => {}
         }
+    }
+
+    fn lost_tab_selection_handler(app_state_container: &mut AppStateContainer) {
+        app_state_container.play_list_selected.select(None);
     }
 }

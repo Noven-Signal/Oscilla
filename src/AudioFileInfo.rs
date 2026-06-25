@@ -66,7 +66,7 @@ impl AudioFileInfo {
         decoder_wrapper.extract_file_info_map_into(mapper)
     }
 
-    pub fn get_disp_name(&self) -> &String {
+    pub fn get_disp_name(&self) -> &str {
         &self.disp_name
     }
 }

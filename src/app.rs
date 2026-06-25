@@ -580,7 +580,8 @@ impl App {
                     match app_state_container.focus_state {
                         TabState::Focused(_) => app_state_container.focus_state = TabState::None,
                         TabState::Selected(tabs) => {
-                            app_state_container.focus_state = TabState::Focused(tabs)
+                            app_state_container.focus_state = TabState::Focused(tabs);
+                            tabs.lost_tab_selection_handler(app_state_container);
                         }
                         TabState::None => {}
                     }
@@ -592,6 +593,43 @@ impl App {
 
         self.render()?;
         Ok(())
+    }
+
+    pub fn play_previous(app_state_container: &mut AppStateContainer) {
+        let (PlayState::Playing(idx) | PlayState::Paused(idx)) = app_state_container.play_state
+        else {
+            return;
+        };
+        if idx == 0  {
+            return;
+        }
+        Self::play_track(app_state_container, idx - 1);
+    }
+    pub fn play_next(app_state_container: &mut AppStateContainer) {
+        let (PlayState::Playing(idx) | PlayState::Paused(idx)) = app_state_container.play_state
+        else {
+            return;
+        };
+        Self::play_track(app_state_container, idx + 1);
+    }
+
+    pub fn play_track(app_state_container: &mut AppStateContainer, idx: usize) {
+        let Some(_) = app_state_container.play_list.get(idx) else {
+            return;
+        };
+        if let Some(PlayerThread {
+            player_control_singnal_sender,
+            ..
+        }) = &mut app_state_container.player_thread
+        {
+            app_state_container.ve_channel = None;
+            app_state_container.wait_next_tack_idx = Some(idx);
+            _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
+        } else {
+            _ = app_state_container
+                .app_control_signal_sender
+                .send(AppContorlSignal::StartPlayer(idx));
+        };
     }
 
     async fn handle_crossterm_event(&mut self, event: &CrosstermEvent) -> color_eyre::Result<()> {

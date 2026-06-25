@@ -1,3 +1,4 @@
+use crate::app::App;
 use crate::extensions::Rect::RectExtension;
 use crate::manipulation::PlayerControlSignal;
 use crate::widgets::Button::{ButtonState, PlayButtonState};
@@ -8,7 +9,9 @@ use ratatui::widgets::{Block, LineGauge};
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::AppState::AppState::{AppStateContainer, AreaHandler, PlayState, PlayerThread, TabState, Tabs};
+use crate::AppState::AppState::{
+    AppStateContainer, AreaHandler, PlayState, PlayerThread, TabState, Tabs,
+};
 use crate::extensions::OnceLock::OnceLock_ext;
 
 use crate::widgets::Button::{Button, ButtonIdent};
@@ -80,8 +83,12 @@ impl AreaHandler for ButtonsArea {
 
         match focused_button_ident {
             ButtonIdent::PlayOrPause(player_button_state) => 'play_arm: {
-                let Some(PlayerThread{player_control_singnal_sender: sender, ..}) = &mut app_state_container.player_thread else {
-                     break 'play_arm;
+                let Some(PlayerThread {
+                    player_control_singnal_sender: sender,
+                    ..
+                }) = &mut app_state_container.player_thread
+                else {
+                    break 'play_arm;
                 };
 
                 let play_state = &mut app_state_container.play_state;
@@ -100,8 +107,8 @@ impl AreaHandler for ButtonsArea {
                     Stopped => todo!(),
                 };
             }
-            ButtonIdent::Prev => todo!(),
-            ButtonIdent::Next => todo!(),
+            ButtonIdent::Prev => App::play_previous(app_state_container),
+            ButtonIdent::Next => App::play_next(app_state_container),
         }
     }
 }
