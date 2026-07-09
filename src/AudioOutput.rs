@@ -22,8 +22,10 @@ use crate::app::{PlayedFrames, PlayerToUISingnal};
 use crate::manipulation::{
     AUDIO_OUTPUT_BUFFER_DURATION, AudioDeviceInfo, CHANNEL, DecoderToRendererSyncSignal,
     EndOfStreamSignal, NUM_OF_BLOCK, RendererControlSignal, RendererToDecoderSsynSignal,
-    SharedBuffer, WorkerToPlayerNotification,
+    SeekSignalForRenderer, SharedBuffer, WorkerToPlayerNotification,
 };
+
+use std::sync::Barrier;
 
 pub fn main(
     shared_buffer: &SharedBuffer,
@@ -32,7 +34,7 @@ pub fn main(
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
     worker_to_player_notofication_signal_sender: UnboundedSender<WorkerToPlayerNotification>,
-    init_vol: u16
+    init_vol: u16,
 ) -> Result<()> {
     unsafe {
         let mut audio_output = AudioOutput::new(
@@ -41,6 +43,7 @@ pub fn main(
             decoder_to_renderer_singal_recv,
             control_signal_receiver,
             player_to_ui_singnal_sender,
+            init_vol,
         )?;
 
         let wave_format = get_waveformat_ex(&audio_output.audio_client)?;
@@ -50,7 +53,7 @@ pub fn main(
             }),
         );
 
-        audio_output.start(init_vol);
+        audio_output.start();
     }
     Ok(())
 }
@@ -60,6 +63,11 @@ unsafe fn get_waveformat_ex(audio_client: &IAudioClient) -> Result<WAVEFORMATEX>
     let wave_format_ptr = audio_client.GetMixFormat()?;
 
     Ok(*wave_format_ptr)
+}
+
+enum RenderLoopEndReason {
+    Stop,
+    Seek,
 }
 
 struct AudioOutput<'a> {
@@ -72,6 +80,8 @@ struct AudioOutput<'a> {
     decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderToRendererSyncSignal>,
     control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
+    current_vol: f32,
+    current_seek_no: u64
 }
 
 impl<'a> AudioOutput<'a> {
@@ -81,6 +91,7 @@ impl<'a> AudioOutput<'a> {
         decoder_to_renderer_singal_recv: UnboundedReceiver<DecoderToRendererSyncSignal>,
         control_signal_receiver: UnboundedReceiver<RendererControlSignal>,
         player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
+        init_vol: u16,
     ) -> Result<Self> {
         unsafe {
             CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
@@ -103,12 +114,20 @@ impl<'a> AudioOutput<'a> {
             wasapi_event_hanle: handle,
             control_signal_receiver,
             player_to_ui_singnal_sender,
+            current_vol: init_vol as f32 / 100f32,
+            current_seek_no: 0
         })
     }
     #[allow(unsafe_op_in_unsafe_fn)]
-    unsafe fn start(&mut self,init_vol: u16) -> Result<()> {
+    unsafe fn start(&mut self) -> Result<()> {
         self.audio_client.Start()?;
-        self.render_loop(init_vol)?;
+        'seek_loop: loop {
+            match self.render_loop()? {
+                RenderLoopEndReason::Stop => break 'seek_loop,
+                RenderLoopEndReason::Seek => continue 'seek_loop,
+            }
+        }
+
         Ok(())
     }
 
@@ -173,7 +192,7 @@ impl<'a> AudioOutput<'a> {
     }
 
     #[allow(unsafe_op_in_unsafe_fn)]
-    unsafe fn render_loop(&mut self, init_vol: u16) -> Result<()> {
+    unsafe fn render_loop(&mut self) -> Result<RenderLoopEndReason> {
         const NUM_OF_BLOCK_LAST_INDEX: usize = NUM_OF_BLOCK - 1;
         let next_block = |read_exclusive| match read_exclusive {
             NUM_OF_BLOCK_LAST_INDEX => 0,
@@ -190,7 +209,7 @@ impl<'a> AudioOutput<'a> {
         let mut head: usize = 0;
         let mut read_exclusive: usize = 0;
         // let mut count = 0;
-        let mut vol = (init_vol as f32) / 100f32;
+        // let mut vol = (init_vol as f32) / 100f32;
 
         enum SendSignalResult {
             OK,
@@ -198,8 +217,16 @@ impl<'a> AudioOutput<'a> {
         }
 
         let mut singnal_to_thread =
-            |read_exclusive: usize, end_of_stream_block: &mut Option<EndOfStreamBlockInfo>| {
-                match self.decoder_to_renderer_singal_recv.blocking_recv() {
+            |decoder_to_renderer_singal_recv: &mut UnboundedReceiver<
+                DecoderToRendererSyncSignal,
+            >,
+             renderer_to_decoder_singal_sender: &mut UnboundedSender<
+                RendererToDecoderSsynSignal,
+            >,
+             read_exclusive: usize,
+             end_of_stream_block: &mut Option<EndOfStreamBlockInfo>| {
+                info!("singnal_to_thread_rebderer_a");
+                match decoder_to_renderer_singal_recv.blocking_recv() {
                     Some(DecoderToRendererSyncSignal::Sync) => {}
                     Some(DecoderToRendererSyncSignal::EndOfStream(EndOfStreamSignal {
                         last_block,
@@ -212,10 +239,10 @@ impl<'a> AudioOutput<'a> {
                     }
                     None => {}
                 }
+                info!("singnal_to_thread_rebderer_b");
 
-                self.renderer_to_decoder_singal_sender
-                    .send(RendererToDecoderSsynSignal());
-
+                renderer_to_decoder_singal_sender.send(RendererToDecoderSsynSignal());
+                info!("singnal_to_thread_rebderer_c");
                 match end_of_stream_block {
                     Some(block) if block.block_idx == next_block(read_exclusive) => {
                         SendSignalResult::EndOfStream
@@ -224,7 +251,12 @@ impl<'a> AudioOutput<'a> {
                 }
             };
 
-        _ = singnal_to_thread(read_exclusive, &mut end_of_stream_block);
+        _ = singnal_to_thread(
+            &mut self.decoder_to_renderer_singal_recv,
+            &mut self.renderer_to_decoder_singal_sender,
+            read_exclusive,
+            &mut end_of_stream_block,
+        );
         'l1: loop {
             let get_block_len = |read_exclusive: usize| self.shared_buffer[read_exclusive][0].len();
 
@@ -237,7 +269,7 @@ impl<'a> AudioOutput<'a> {
                 let reciever = &mut self.control_signal_receiver;
                 match reciever.blocking_recv() {
                     Some(RendererControlSignal::SetVol(set_vol)) => {
-                        vol = set_vol as f32 / 100f32;
+                        self.current_vol = set_vol as f32 / 100f32;
                         continue 'control_singal_loop;
                     }
                     Some(RendererControlSignal::Pause) => {
@@ -252,8 +284,37 @@ impl<'a> AudioOutput<'a> {
                     }
                     Some(RendererControlSignal::Stop) => {
                         _ = self.audio_client.Stop();
-                        _ = singnal_to_thread(read_exclusive, &mut end_of_stream_block);
+                        _ = singnal_to_thread(
+                            &mut self.decoder_to_renderer_singal_recv,
+                            &mut self.renderer_to_decoder_singal_sender,
+                            read_exclusive,
+                            &mut end_of_stream_block,
+                        );
                         break 'l1;
+                    }
+                    Some(RendererControlSignal::Seek(SeekSignalForRenderer {
+                        sync_obj,
+                        target_duration,
+                        renderer_to_decoder_sync_signal_sender,
+                        decoder_to_renderer_sync_signal_recv,
+                        seek_no,
+                    })) => {
+                        self.audio_client.Stop()?;
+                        self.audio_client.Reset()?;
+                        self.audio_client.Start()?;
+
+                        self.renderer_to_decoder_singal_sender =
+                            renderer_to_decoder_sync_signal_sender;
+                        self.decoder_to_renderer_singal_recv = decoder_to_renderer_sync_signal_recv;
+                        // read_exclusive = 0;
+                        // head = 0;
+                        // end_of_stream_block = None;
+                        // sync_obj.init_sync.wait(1);
+                        self.current_seek_no = seek_no;
+
+                        sync_obj.complete_sync.wait(1);
+                        info!("renderer_seek_completed");
+                        return Ok(RenderLoopEndReason::Seek);
                     }
                     _ => break 'l1,
                 }
@@ -288,8 +349,8 @@ impl<'a> AudioOutput<'a> {
                 let src_slice_ch_1 = get_src_slice(1);
 
                 for i in 0..src_slice_ch_0.len() {
-                    output_buffer[i * CHANNEL] = src_slice_ch_0[i] * vol;
-                    output_buffer[i * CHANNEL + 1] = src_slice_ch_1[i] * vol;
+                    output_buffer[i * CHANNEL] = src_slice_ch_0[i] * self.current_vol;
+                    output_buffer[i * CHANNEL + 1] = src_slice_ch_1[i] * self.current_vol;
                 }
             };
 
@@ -305,9 +366,12 @@ impl<'a> AudioOutput<'a> {
                 Equal => {
                     fill_buff_within_block();
 
-                    if let SendSignalResult::EndOfStream =
-                        singnal_to_thread(read_exclusive, &mut end_of_stream_block)
-                    {
+                    if let SendSignalResult::EndOfStream = singnal_to_thread(
+                        &mut self.decoder_to_renderer_singal_recv,
+                        &mut self.renderer_to_decoder_singal_sender,
+                        read_exclusive,
+                        &mut end_of_stream_block,
+                    ) {
                         break 'l1;
                     }
 
@@ -323,12 +387,19 @@ impl<'a> AudioOutput<'a> {
                         let src_slice_current_ch_1 = &get_src_slice(1);
 
                         for i in 0..src_slice_current_ch_0.len() {
-                            output_buffer[i * CHANNEL] = src_slice_current_ch_0[i] * vol;
-                            output_buffer[i * CHANNEL + 1] = src_slice_current_ch_1[i] * vol;
+                            output_buffer[i * CHANNEL] =
+                                src_slice_current_ch_0[i] * self.current_vol;
+                            output_buffer[i * CHANNEL + 1] =
+                                src_slice_current_ch_1[i] * self.current_vol;
                         }
                     }
 
-                    let res = singnal_to_thread(read_exclusive, &mut end_of_stream_block);
+                    let res = singnal_to_thread(
+                        &mut self.decoder_to_renderer_singal_recv,
+                        &mut self.renderer_to_decoder_singal_sender,
+                        read_exclusive,
+                        &mut end_of_stream_block,
+                    );
 
                     read_exclusive = next_block(read_exclusive);
 
@@ -348,9 +419,9 @@ impl<'a> AudioOutput<'a> {
                         };
                         for i in 0..src_slice_spill_over_ch_0.len() {
                             output_buffer[i * CHANNEL + split_len_channel_combined] =
-                                src_slice_spill_over_ch_0[i] * vol;
+                                src_slice_spill_over_ch_0[i] * self.current_vol;
                             output_buffer[i * CHANNEL + 1 + split_len_channel_combined] =
-                                src_slice_spill_over_ch_1[i] * vol;
+                                src_slice_spill_over_ch_1[i] * self.current_vol;
                         }
                     }
                     head = spill_over_len;
@@ -375,6 +446,7 @@ impl<'a> AudioOutput<'a> {
                 .send(PlayerToUISingnal::PlayedFrames(PlayedFrames {
                     frames: (available as u32),
                     buffered_frames: padding as u32,
+                    seek_no: self.current_seek_no
                 }));
 
             if this_iter_is_end_of_stream {
@@ -387,13 +459,13 @@ impl<'a> AudioOutput<'a> {
                     Self::wait_for_wasapi_event(self.wasapi_event_hanle)?;
                     let padding = self.audio_client.GetCurrentPadding()?;
 
-
                     self.player_to_ui_singnal_sender
                         .send(PlayerToUISingnal::PlayedFrames(PlayedFrames {
                             frames: (0u32),
                             buffered_frames: padding as u32,
+                            seek_no: self.current_seek_no
                         }));
-                    
+
                     if padding == 0 {
                         break 'l2;
                     }
@@ -408,7 +480,7 @@ impl<'a> AudioOutput<'a> {
             .player_to_ui_singnal_sender
             .send(PlayerToUISingnal::RendererPlayCompleted);
 
-        Ok(())
+        Ok(RenderLoopEndReason::Stop)
     }
 }
 impl<'a> Drop for AudioOutput<'a> {

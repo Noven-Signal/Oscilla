@@ -14,6 +14,7 @@ pub mod AppState {
     use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
+    use crate::widgets::DurationBarArea::DurationBarArea;
     use crate::widgets::EffectArea::EffectArea;
     use crate::widgets::ListArea::ListArea;
     use crate::widgets::VolArea::VolArea;
@@ -50,7 +51,7 @@ pub mod AppState {
             match $self {
                 Tabs::ListArea => handle_key_via_trait!(ListArea, $ident),
                 Tabs::EffectArea => handle_key_via_trait!(EffectArea, $ident),
-                Tabs::DurationBarArea => todo!(),
+                Tabs::DurationBarArea => handle_key_via_trait!(DurationBarArea, $ident),
                 Tabs::ButtonsArea => handle_key_via_trait!(ButtonsArea, $ident),
                 Tabs::VolArea => handle_key_via_trait!(VolArea, $ident),
             }
@@ -150,6 +151,7 @@ pub mod AppState {
         pub file_sample_rate: usize,
         pub audio_device_sample_rate: usize,
         pub track_duraion: Duration,
+        pub seek_completed_recieved_seek_no: u64,
         current_played_duration: Duration,
         audio_device_buffered_duration: Duration,
     }
@@ -166,6 +168,7 @@ pub mod AppState {
                 track_duraion,
                 current_played_duration: Duration::ZERO,
                 audio_device_buffered_duration: Duration::ZERO,
+                seek_completed_recieved_seek_no: 0
             }
         }
 
@@ -183,6 +186,17 @@ pub mod AppState {
             self.audio_device_buffered_duration = Duration::from_secs_f64(
                 (buffered_frames + add_frames) as f64 / self.audio_device_sample_rate as f64,
             );
+        }
+        pub fn set_played_duration_direct(
+            &mut self,
+            current_played_duration: Duration,
+            audio_device_buffered_duration: Duration,
+        ) {
+            *self = Self {
+                current_played_duration,
+                audio_device_buffered_duration,
+                ..*self
+            };
         }
     }
 
@@ -281,6 +295,8 @@ pub mod AppState {
         pub ve_switcher_request_signal_recv: UnboundedReceiver<VeSwitcherRequestSignal>,
         pub wait_next_tack_idx: Option<usize>,
         pub app_control_signal_sender: UnboundedSender<AppContorlSignal>,
+        pub seek_no: u64,
+        pub played_frame_buffer: Option<u32>
     }
 
     impl AppStateContainer {
@@ -311,6 +327,8 @@ pub mod AppState {
                 ve_switcher_request_signal_recv,
                 wait_next_tack_idx: None,
                 app_control_signal_sender,
+                seek_no: 0,
+                played_frame_buffer: None
             }
         }
     }

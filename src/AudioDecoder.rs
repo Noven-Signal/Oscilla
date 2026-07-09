@@ -1,6 +1,10 @@
-use std::ops::AddAssign;
+use std::{
+    ops::AddAssign,
+    sync::atomic::Ordering,
+    time::{self, Duration},
+};
 
-use symphonia::core::audio::Signal;
+use symphonia::core::{audio::Signal, formats::SeekedTo};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::info;
 
@@ -10,9 +14,10 @@ use crate::{
     app::PlayerToUISingnal,
     manipulation::{
         CHANNEL, DecoderControlSignal, DecoderToRendererSyncSignal, DecorderToVeSyncSignal,
-        EndOfStreamSignal, NUM_OF_BLOCK, RendererToDecoderSsynSignal, SampleRate, SharedBuffer,
-        VeEnabledInfoFromDecoder, VeEnabledSignalFromPlayerToDecoder, VeToDecoderSyncSignal,
-        WorkerToPlayerNotification,
+        EndOfStreamSignal, NUM_OF_BLOCK, RendererToDecoderSsynSignal, SampleRate,
+        SeekCompleteFromDecoderSignal, SeekSignalForDecoder, SeekSignalForDecoderVeChannels,
+        SeekTimingSyncObj, SharedBuffer, VeEnabledInfoFromDecoder,
+        VeEnabledSignalFromPlayerToDecoder, VeToDecoderSyncSignal, WorkerToPlayerNotification,
     },
     utils::array_init,
 };
@@ -23,7 +28,7 @@ pub fn decode_loop(
     decoder_wrapper: &mut DecoderWrapper,
     shared_buffer: &mut SharedBuffer,
     audio_device_sample_rate: SampleRate,
-    decoder_to_renderer_sender: UnboundedSender<DecoderToRendererSyncSignal>,
+    mut decoder_to_renderer_sender: UnboundedSender<DecoderToRendererSyncSignal>,
     mut renderer_to_decoder_singal_recv: UnboundedReceiver<RendererToDecoderSsynSignal>,
     mut decoder_control_signal: UnboundedReceiver<DecoderControlSignal>,
     decoder_to_player_notification_signal: UnboundedSender<WorkerToPlayerNotification>,
@@ -43,8 +48,10 @@ pub fn decode_loop(
 
     let singnal_to_thread =
         |renderer_to_decoder_singal_recv: &mut UnboundedReceiver<RendererToDecoderSsynSignal>,
+         decoder_to_renderer_sender: &UnboundedSender<DecoderToRendererSyncSignal>,
          ve_signal: &mut Option<VeSignal>,
          send_signal: DecoderToRendererSyncSignal| {
+            //info!("singnal_to_threal_decoer_a");
             renderer_to_decoder_singal_recv.blocking_recv();
             if let Some(VeSignal {
                 ve_to_decoder_signal_recv,
@@ -54,13 +61,18 @@ pub fn decode_loop(
                 ve_to_decoder_signal_recv.blocking_recv();
                 decoder_to_ve_signal_sender.send(DecorderToVeSyncSignal());
             }
-            decoder_to_renderer_sender.send(send_signal)
+            //info!("singnal_to_threal_decoer_b");
+            let ret = decoder_to_renderer_sender.send(send_signal);
+            //info!("singnal_to_threal_decoer_c");
+            ret
         };
     let singnal_to_thread_sync =
         |renderer_to_decoder_singal_recv: &mut UnboundedReceiver<RendererToDecoderSsynSignal>,
+         decoder_to_renderer_sender: &UnboundedSender<DecoderToRendererSyncSignal>,
          ve_signal: &mut Option<VeSignal>| {
             singnal_to_thread(
                 renderer_to_decoder_singal_recv,
+                decoder_to_renderer_sender,
                 ve_signal,
                 DecoderToRendererSyncSignal::Sync,
             )
@@ -89,12 +101,22 @@ pub fn decode_loop(
             );
         };
 
+    let get_threshold_len = |resample_container: &Option<ResampleContainer>| {
+        if let Some(x) = resample_container {
+            x.decode_tmp_block[0].len()
+        } else {
+            BLOCK_SIZE_DEFAULT
+        }
+    };
+
     let mut write_exclusive: usize = 0;
     let mut head: usize = 0;
 
     let mut end_of_stream_reached = false;
 
     let mut block_count: usize = 0;
+
+    let mut current_played_sample: u64 = 0;
 
     let Some(file_sample_rate) = decoder_wrapper.get_sample_rate() else {
         return;
@@ -174,10 +196,12 @@ pub fn decode_loop(
             }
         };
         if end_of_stream_reached || !decoder_control_signal.is_empty() {
+            info!("decoder_control_signal.blocking_recv() ");
             match decoder_control_signal.blocking_recv() {
                 Some(DecoderControlSignal::Stop) => {
                     _ = singnal_to_thread_sync(
                         &mut renderer_to_decoder_singal_recv,
+                        &decoder_to_renderer_sender,
                         &mut ve_signal,
                     );
                     break 'l1;
@@ -232,6 +256,70 @@ pub fn decode_loop(
                     _ = decoder_to_player_notification_signal
                         .send(WorkerToPlayerNotification::VeDisabledSync);
                 }
+                Some(DecoderControlSignal::Seek(SeekSignalForDecoder {
+                    sync_obj,
+                    target_duration,
+                    seek_no,
+                    decoder_to_renderer_sync_signal_sender,
+                    renderer_to_decoder_sync_signal_recv,
+                    seek_signal_for_decoder_ve_channels,
+                })) => 'b1: {
+                    info!("decoder_seek_signal");
+
+                    let (sync_obj_increment, ve_enabled_flg_for_completed_notification) =
+                        match seek_signal_for_decoder_ve_channels {
+                            Some(_) => (1, true),
+                            None => (2, false),
+                        };
+
+                    decoder_to_renderer_sender = decoder_to_renderer_sync_signal_sender;
+                    renderer_to_decoder_singal_recv = renderer_to_decoder_sync_signal_recv;
+
+                    if let Some(SeekSignalForDecoderVeChannels {
+                        decoder_to_ve_sync_signal_sender,
+                        ve_to_decoder_sync_signal_recv,
+                    }) = seek_signal_for_decoder_ve_channels
+                    {
+                        ve_signal = Some(VeSignal {
+                            decoder_to_ve_signal_sender: decoder_to_ve_sync_signal_sender,
+                            ve_to_decoder_signal_recv: ve_to_decoder_sync_signal_recv,
+                        });
+                    }
+                    let mut seek = || {
+                        let seeked = decoder_wrapper.seek(target_duration);
+
+                        let convert_sample_count_to_sec_f64 =
+                            |ts| ts as f64 / file_sample_rate.rawValue() as f64;
+
+                        match seeked {
+                            Ok(SeekedTo { actual_ts, .. }) => {
+                                block_count = (actual_ts
+                                    / get_threshold_len(&resample_container) as u64)
+                                    as usize;
+                                write_exclusive = 0;
+                                head = 0;
+                                end_of_stream_reached = false;
+                                current_played_sample = actual_ts;
+                                convert_sample_count_to_sec_f64(actual_ts)
+                            }
+                            Err(x) => {
+                                info!("Decode Init Error {x}");
+                                convert_sample_count_to_sec_f64(current_played_sample)
+                            }
+                        }
+                    };
+                    let actual_ts_sec_f64 = seek();
+
+                    sync_obj.complete_sync.wait(sync_obj_increment);
+                    let signal = SeekCompleteFromDecoderSignal {
+                        actual_seek_duration_sec: actual_ts_sec_f64,
+                        seek_no,
+                        ve_enabled: ve_enabled_flg_for_completed_notification,
+                    };
+                    decoder_to_player_notification_signal
+                        .send(WorkerToPlayerNotification::SeekCompleteFromDecoder(signal));
+                    info!("decoder_seek_completed");
+                }
                 None => break 'l1,
             }
         }
@@ -256,13 +344,9 @@ pub fn decode_loop(
             };
 
             let target_len = head + view[0].len();
-            let threshold_len = if let Some(ref x) = resample_container {
-                x.decode_tmp_block[0].len()
-            } else {
-                BLOCK_SIZE_DEFAULT
-            };
+
             use std::cmp::Ordering::*;
-            match Ord::cmp(&target_len, &threshold_len) {
+            match Ord::cmp(&target_len, &get_threshold_len(&resample_container)) {
                 Less => {
                     fill_buff_within_block(get_exclusizebuff!());
                     head = head + view[0].len();
@@ -296,11 +380,11 @@ pub fn decode_loop(
                         &mut resample_container,
                     );
 
-                    if let Err(_) =
-                        singnal_to_thread_sync(&mut renderer_to_decoder_singal_recv, &mut ve_signal)
-                    {
-                        return DecodeLoopResult::Error;
-                    }
+                    _ = singnal_to_thread_sync(
+                        &mut renderer_to_decoder_singal_recv,
+                        &decoder_to_renderer_sender,
+                        &mut ve_signal,
+                    );
 
                     write_exclusive = next_block(write_exclusive);
                     block_count = block_count + 1;
@@ -334,6 +418,7 @@ pub fn decode_loop(
                     if let DecodeLoopResult::Error = proc_f32(&view) {
                         break 'l1;
                     }
+                    current_played_sample.add_assign(cow.chan(0).len() as u64);
                 }
                 S16(cow) => {
                     let f = |x| (x as f32) / (i16::MAX as f32);
@@ -346,6 +431,7 @@ pub fn decode_loop(
                         |i: usize| &type_conversion_buff[i][0..cow.chan(i).len()];
                     let target = [0, 1].map(|i| type_conversion_buff_view(i));
                     proc_f32(&target);
+                    current_played_sample.add_assign(cow.chan(0).len() as u64);
                 }
                 _ => {}
             },
@@ -365,6 +451,7 @@ pub fn decode_loop(
 
                 _ = singnal_to_thread(
                     &mut renderer_to_decoder_singal_recv,
+                    &decoder_to_renderer_sender,
                     &mut ve_signal,
                     DecoderToRendererSyncSignal::EndOfStream(EndOfStreamSignal {
                         last_block: write_exclusive,

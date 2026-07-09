@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     fmt::Debug,
+    ops::AddAssign,
     pin::Pin,
     sync::atomic::{AtomicPtr, Ordering},
     time::{Duration, SystemTime},
@@ -16,10 +17,10 @@ use crate::{
         },
     },
     app,
-    // event_handler::{EventHandler, EventHndlerToAppSignal},
     manipulation::{
         self, AudioDeviceInfo, DecoderControlSignal::VeDisabled, NUM_OF_BLOCK_VE, OscilloscopeData,
-        PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer,
+        PlayerControlSignal, SeekCompleteFromVeSignal, UiToPlayerSeekSignal, UiVEThreadSyncSignal,
+        VESharedBuffer,
     },
     tui::Tui,
     utils::array_init,
@@ -84,7 +85,15 @@ pub struct TrackInfo {
 pub struct PlayedFrames {
     pub frames: u32,
     pub buffered_frames: u32,
+    pub seek_no: u64,
 }
+
+pub struct SeekCompleteSignal {
+    pub seek_ve_completed_signal: Option<SeekCompleteFromVeSignal>,
+    pub actual_seek_duration_sec: f64,
+    pub seek_no: u64,
+}
+
 pub enum PlayerToUISingnal {
     NoticeTrackInfo(TrackInfo),
     PlayedFrames(PlayedFrames),
@@ -93,6 +102,7 @@ pub enum PlayerToUISingnal {
     VeDisabled,
     RendererPlayCompleted,
     EndOfStream,
+    SeekComplete(SeekCompleteSignal),
 }
 
 pub struct PlayerToUISingnalVeEnabled {
@@ -319,7 +329,7 @@ impl App {
                 } => {
                     match signal{
                         Some(signal) => {
-                        ve_switcher_requst_signal = Some(signal);
+                            ve_switcher_requst_signal = Some(signal);
                         },
                         None => {},
                     }
@@ -332,7 +342,7 @@ impl App {
                 }=> {
                     match signal{
                         Some(signal) => {
-                        ve_switcher_sync_signal = Some(signal);
+                            ve_switcher_sync_signal = Some(signal);
                         },
                         None => {},
                     }
@@ -442,10 +452,36 @@ impl App {
             PlayerToUISingnal::PlayedFrames(PlayedFrames {
                 frames,
                 buffered_frames,
+                seek_no,
             }) => 'b1: {
                 let Some(ref mut track_info) = *playing_tarck_info else {
                     break 'b1;
                 };
+
+                let frames = match (track_info.seek_completed_recieved_seek_no, seek_no) {
+                    (x, y) if x + 1 == y => {
+                        let inner = self.app_state_container.played_frame_buffer.as_mut();
+                        match inner {
+                            Some(x) => *x = *x + frames,
+                            None => self.app_state_container.played_frame_buffer = Some(frames),
+                        };
+                        0
+                    }
+                    (x,y) if x == y => {
+                        if let Some(played_buffer_frames) =
+                            self.app_state_container.played_frame_buffer
+                        {
+                            let ret = frames + played_buffer_frames;
+                            self.app_state_container.played_frame_buffer = None;
+                            ret
+                        } else {
+                            frames
+                        }
+                    }
+                    _ => 0
+                };
+
+                //info!("PlayedFrames {seek_no}");
 
                 let before_duration = track_info.get_carib_duration();
                 track_info.set_played_duration(frames, buffered_frames);
@@ -513,6 +549,42 @@ impl App {
                     break 'b1;
                 };
                 player_control_singnal_sender.send(PlayerControlSignal::Stop);
+            }
+            PlayerToUISingnal::SeekComplete(SeekCompleteSignal {
+                seek_ve_completed_signal,
+                actual_seek_duration_sec,
+                seek_no,
+            }) => 'b1: {
+                let Some(ref mut playing_track_info) = self.app_state_container.playing_track_info
+                else {
+                    break 'b1;
+                };
+                playing_track_info.set_played_duration_direct(
+                    Duration::from_secs_f64(actual_seek_duration_sec),
+                    Duration::ZERO,
+                );
+                info!("UI seek complete");
+
+                playing_track_info.seek_completed_recieved_seek_no = seek_no;
+
+                if let Some(SeekCompleteFromVeSignal {
+                    ui_to_ve_signal_sender,
+                    ve_to_ui_signal_recv,
+                }) = seek_ve_completed_signal
+                {
+                    // let PlayState::Seeking(idx) = self.app_state_container.play_state else {
+                    //     break 'b1;
+                    // };
+                    self.app_state_container.ve_channel = Some(Ves {
+                        ui_to_ve_signal_sender,
+                        ve_to_ui_signal_recv,
+                        ve_buffer_duration_offset_sec: actual_seek_duration_sec,
+                        interval: tokio::time::interval(Duration::from_secs_f64(1f64 / 60f64)),
+                        ve_frame_count: 0,
+                        ve_read_exclusive: 0,
+                    });
+                    //self.app_state_container.play_state = PlayState::Playing(idx);
+                }
             }
         }
         Ok(())
@@ -600,7 +672,7 @@ impl App {
         else {
             return;
         };
-        if idx == 0  {
+        if idx == 0 {
             return;
         }
         Self::play_track(app_state_container, idx - 1);
@@ -630,6 +702,51 @@ impl App {
                 .app_control_signal_sender
                 .send(AppContorlSignal::StartPlayer(idx));
         };
+    }
+
+    pub fn seek_prev(app_state_container: &mut AppStateContainer, move_amout: Duration) {
+        let Some(ref mut playing_track_info) = app_state_container.playing_track_info else {
+            return;
+        };
+
+        let carib_duration = playing_track_info.get_carib_duration();
+        let reqest_pos = carib_duration.saturating_sub(move_amout);
+        Self::seek(app_state_container, reqest_pos);
+    }
+
+    pub fn seek_forward(app_state_container: &mut AppStateContainer, move_amout: Duration) {
+        let Some(ref mut playing_track_info) = app_state_container.playing_track_info else {
+            return;
+        };
+
+        let carib_duration = playing_track_info.get_carib_duration();
+        let reqest_pos = carib_duration + move_amout;
+        if reqest_pos > playing_track_info.track_duraion {
+            Self::play_next(app_state_container);
+            return;
+        }
+
+        Self::seek(app_state_container, reqest_pos);
+    }
+
+    pub fn seek(app_state_container: &mut AppStateContainer, reqest_pos: Duration) {
+        let Some(ref mut playing_track_info) = app_state_container.playing_track_info else {
+            return;
+        };
+
+        let Some(PlayerThread {
+            ref mut player_control_singnal_sender,
+            ..
+        }) = app_state_container.player_thread
+        else {
+            return;
+        };
+        app_state_container.seek_no.add_assign(1);
+        // app_state_container.play_state = PlayState::Seeking(playing_idx);
+        player_control_singnal_sender.send(PlayerControlSignal::Seek(UiToPlayerSeekSignal {
+            target_duration: reqest_pos,
+            seek_no: app_state_container.seek_no,
+        }));
     }
 
     async fn handle_crossterm_event(&mut self, event: &CrosstermEvent) -> color_eyre::Result<()> {

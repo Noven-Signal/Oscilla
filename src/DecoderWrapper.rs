@@ -6,12 +6,13 @@ use std::time::Duration;
 use symphonia::core::audio::{AsAudioBufferRef, AudioBufferRef, Signal};
 use symphonia::core::codecs::{CodecParameters, Decoder, DecoderOptions};
 
-use symphonia::core::formats::{FormatReader, Packet};
+use symphonia::core::formats::{FormatReader, Packet, SeekMode, SeekTo, SeekedTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::{Metadata, Tag};
 use symphonia::core::probe::{Hint, ProbeResult};
+use symphonia::core::units::Time;
 use symphonia::default::get_probe;
-use tracing::info;
+use tracing::{Instrument, info};
 
 /// Options for the decode command.
 #[derive(Copy, Clone)]
@@ -24,6 +25,7 @@ pub struct DecoderOptionsAndTrackNum {
 pub enum DecodeInitError {
     FileOpenFailed,
     NoTrackFound,
+    SeekError(symphonia::core::errors::Error),
 }
 
 // 1. Implement Display for user-friendly messages
@@ -46,6 +48,7 @@ pub struct DecoderWrapper {
 pub enum DecodeResult<'a> {
     Buf(AudioBufferRef<'a>),
     Err(symphonia::core::errors::Error),
+
     EndOfStream,
     None,
 }
@@ -117,7 +120,7 @@ impl DecoderWrapper {
         //   do_verification(decoder.finalize())
     }
 
-    fn get_codec_params(&self) -> Option<&CodecParameters> {
+    pub fn get_codec_params(&self) -> Option<&CodecParameters> {
         Some(
             &self
                 .probe_result
@@ -168,5 +171,29 @@ impl DecoderWrapper {
             Some(current) => current.tags(),
             None => &[],
         }
+    }
+
+    pub fn seek(&mut self, target_duration: Duration) -> Result<SeekedTo, DecodeInitError> {
+        trait TimeExt {
+            fn from_duration(duration: Duration) -> Self;
+        }
+        impl TimeExt for Time {
+            fn from_duration(duration: Duration) -> Self {
+                let seconds = duration.as_secs();
+                let fraction = duration.subsec_nanos() as f64 / 1_000_000_000.0;
+                Time::new(seconds, fraction)
+            }
+        }
+
+        self.probe_result
+            .format
+            .seek(
+                SeekMode::Accurate,
+                SeekTo::Time {
+                    time: Time::from_duration(target_duration),
+                    track_id: Some(self.track_id),
+                },
+            )
+            .map_err(DecodeInitError::SeekError)
     }
 }
