@@ -50,7 +50,15 @@ pub struct Ves {
     pub ve_buffer_duration_offset_sec: f64,
     pub interval: Interval,
     pub ve_frame_count: u32,
-    pub ve_read_exclusive: usize,
+    pub ve_read_exclusive: Option<usize>,
+}
+
+impl Ves {
+    pub fn set0_if_none(ve_read_exclusive: &mut Option<usize>) {
+        if ve_read_exclusive.is_none() {
+            *ve_read_exclusive = Some(0);
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -168,7 +176,10 @@ impl App {
         });
     }
 
-    async fn ve_sync(ve_read_exclusive: &mut usize) {
+    async fn ve_sync(ve_read_exclusive: &mut Option<usize>) {
+        let Some(ve_read_exclusive) = ve_read_exclusive else {
+            panic!("this is a bug");
+        };
         const NUM_OF_BLOCK_VE_LAST_INDEX: usize = NUM_OF_BLOCK_VE - 1;
         *ve_read_exclusive = match *ve_read_exclusive {
             NUM_OF_BLOCK_VE_LAST_INDEX => 0,
@@ -238,6 +249,7 @@ impl App {
                     ..=M_N1_60_DOBULE => VeProcResult::VeIsTooForward,
                     M_N1_60_DOBULE..=N1_60_DOBULE => {
                         ve_to_ui_signal_recv.recv().await;
+                        Ves::set0_if_none(ve_read_exclusive);
                         VeProcResult::SyncRange
                     }
                     diff => {
@@ -245,7 +257,7 @@ impl App {
                         for _ in 0..num_of_frame_forward - 1 {
                             //dbg!(i);
                             ve_to_ui_signal_recv.recv().await;
-
+                            Ves::set0_if_none(ve_read_exclusive);
                             Self::ve_sync(ve_read_exclusive).await;
                             ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
                             *ve_frame_count = *ve_frame_count + 1;
@@ -467,7 +479,7 @@ impl App {
                         };
                         0
                     }
-                    (x,y) if x == y => {
+                    (x, y) if x == y => {
                         if let Some(played_buffer_frames) =
                             self.app_state_container.played_frame_buffer
                         {
@@ -478,7 +490,7 @@ impl App {
                             frames
                         }
                     }
-                    _ => 0
+                    _ => 0,
                 };
 
                 //info!("PlayedFrames {seek_no}");
@@ -502,7 +514,7 @@ impl App {
                     ve_buffer_duration_offset_sec,
                     interval: tokio::time::interval(Duration::from_secs_f64(1f64 / 60f64)),
                     ve_frame_count: 0,
-                    ve_read_exclusive: 0,
+                    ve_read_exclusive: None,
                 });
             }
             PlayerToUISingnal::VeDisabled => {
@@ -581,7 +593,7 @@ impl App {
                         ve_buffer_duration_offset_sec: actual_seek_duration_sec,
                         interval: tokio::time::interval(Duration::from_secs_f64(1f64 / 60f64)),
                         ve_frame_count: 0,
-                        ve_read_exclusive: 0,
+                        ve_read_exclusive: None,
                     });
                     //self.app_state_container.play_state = PlayState::Playing(idx);
                 }

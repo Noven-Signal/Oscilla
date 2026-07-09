@@ -114,8 +114,6 @@ pub fn decode_loop(
 
     let mut end_of_stream_reached = false;
 
-    let mut block_count: usize = 0;
-
     let mut current_played_sample: u64 = 0;
 
     let Some(file_sample_rate) = decoder_wrapper.get_sample_rate() else {
@@ -124,6 +122,10 @@ pub fn decode_loop(
 
     let Ok(file_sample_rate) = SampleRate::try_from(file_sample_rate as usize) else {
         return;
+    };
+    let get_block_count = |current_played_sample: u64,resample_container: &Option<ResampleContainer>| {
+        let block_size = get_threshold_len(resample_container);
+        current_played_sample /block_size as u64
     };
 
     struct ResampleContainer {
@@ -226,7 +228,8 @@ pub fn decode_loop(
 
                     let ve_buffer_duration_offset_sec = {
                         let target_block_count =
-                            block_count as i32 + len as i32 + 1 - NUM_OF_BLOCK as i32;
+                            get_block_count(current_played_sample,&resample_container) as i32 + len as i32 + 1
+                                - NUM_OF_BLOCK as i32;
 
                         let target_duration = (target_block_count as f64 * get_block_size() as f64)
                             / audio_device_sample_rate.rawValue() as f64;
@@ -293,9 +296,6 @@ pub fn decode_loop(
 
                         match seeked {
                             Ok(SeekedTo { actual_ts, .. }) => {
-                                block_count = (actual_ts
-                                    / get_threshold_len(&resample_container) as u64)
-                                    as usize;
                                 write_exclusive = 0;
                                 head = 0;
                                 end_of_stream_reached = false;
@@ -387,7 +387,6 @@ pub fn decode_loop(
                     );
 
                     write_exclusive = next_block(write_exclusive);
-                    block_count = block_count + 1;
 
                     let fill_spill_over_block_buff =
                         |exclusive_buf_spill_over: &mut [f32], spill_over_view: &[f32]| {

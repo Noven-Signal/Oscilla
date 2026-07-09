@@ -72,7 +72,7 @@ impl StatefulWidget for EffectArea {
         };
 
         let Some(Ves {
-            ve_read_exclusive, ..
+            ve_read_exclusive: Some(ve_read_exclusive), ..
         }) = state.ve_channel
         else {
             return;
