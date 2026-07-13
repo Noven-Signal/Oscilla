@@ -1,10 +1,10 @@
 use std::{
     collections::VecDeque,
     fmt::Debug,
-    ops::AddAssign,
+    ops::{Add, AddAssign},
     pin::Pin,
     sync::atomic::{AtomicPtr, Ordering},
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
     usize,
 };
 
@@ -51,14 +51,6 @@ pub struct Ves {
     pub interval: Interval,
     pub ve_frame_count: u32,
     pub ve_read_exclusive: Option<usize>,
-}
-
-impl Ves {
-    pub fn set0_if_none(ve_read_exclusive: &mut Option<usize>) {
-        if ve_read_exclusive.is_none() {
-            *ve_read_exclusive = Some(0);
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -111,6 +103,11 @@ pub enum PlayerToUISingnal {
     RendererPlayCompleted,
     EndOfStream,
     SeekComplete(SeekCompleteSignal),
+}
+
+pub enum PlayerRequestState {
+    Seek(u64),
+    VeSwitching,
 }
 
 pub struct PlayerToUISingnalVeEnabled {
@@ -177,13 +174,10 @@ impl App {
     }
 
     async fn ve_sync(ve_read_exclusive: &mut Option<usize>) {
-        let Some(ve_read_exclusive) = ve_read_exclusive else {
-            panic!("this is a bug");
-        };
         const NUM_OF_BLOCK_VE_LAST_INDEX: usize = NUM_OF_BLOCK_VE - 1;
         *ve_read_exclusive = match *ve_read_exclusive {
-            NUM_OF_BLOCK_VE_LAST_INDEX => 0,
-            x => x + 1,
+            None | Some(NUM_OF_BLOCK_VE_LAST_INDEX) => Some(0),
+            Some(x) => Some(x + 1),
         };
     }
 
@@ -249,7 +243,6 @@ impl App {
                     ..=M_N1_60_DOBULE => VeProcResult::VeIsTooForward,
                     M_N1_60_DOBULE..=N1_60_DOBULE => {
                         ve_to_ui_signal_recv.recv().await;
-                        Ves::set0_if_none(ve_read_exclusive);
                         VeProcResult::SyncRange
                     }
                     diff => {
@@ -257,7 +250,6 @@ impl App {
                         for _ in 0..num_of_frame_forward - 1 {
                             //dbg!(i);
                             ve_to_ui_signal_recv.recv().await;
-                            Ves::set0_if_none(ve_read_exclusive);
                             Self::ve_sync(ve_read_exclusive).await;
                             ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
                             *ve_frame_count = *ve_frame_count + 1;
@@ -341,7 +333,7 @@ impl App {
                 } => {
                     match signal{
                         Some(signal) => {
-                            ve_switcher_requst_signal = Some(signal);
+                    ve_switcher_requst_signal = Some(signal);
                         },
                         None => {},
                     }
@@ -379,10 +371,13 @@ impl App {
 
             if let (Some(ref signal), Some(_)) =
                 (ve_switcher_requst_signal, ve_switcher_sync_signal)
+                && self.app_state_container.player_request_state.is_none()
             {
                 self.handle_ve_switching(signal.request_tab)?;
                 ve_switcher_requst_signal = None;
                 ve_switcher_sync_signal = None;
+                self.app_state_container.player_request_state =
+                    Some(PlayerRequestState::VeSwitching);
             }
         }
 
@@ -524,26 +519,15 @@ impl App {
                 _ = self
                     .ve_switcher_sync_signal_sender
                     .send(VeSwitcherSyncSignal());
+                self.app_state_container.player_request_state = None;
             }
             PlayerToUISingnal::VeEnabledSync => {
                 _ = self
                     .ve_switcher_sync_signal_sender
                     .send(VeSwitcherSyncSignal());
-            }
-            // PlayerToUISingnal::PlayCompleted => {
-            //     if let Some(PlayerThread {
-            //         player_control_singnal_sender,
-            //         ..
-            //     }) = &mut self.app_state_container.player_thread
-            //     {
-            //         _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
-            //     }
-            //     self.app_state_container.play_state = PlayState::Stopped;
-            //     self.app_state_container.playing_track_info = None;
-            //     self.app_state_container.ve_channel = None;
 
-            //     _ = self.render();
-            // }
+                self.app_state_container.player_request_state = None;
+            }
             PlayerToUISingnal::EndOfStream => 'b1: {
                 let next_idx = match self.app_state_container.play_state {
                     PlayState::Playing(idx) | PlayState::Paused(idx) => idx + 1,
@@ -578,6 +562,7 @@ impl App {
                 info!("UI seek complete");
 
                 playing_track_info.seek_completed_recieved_seek_no = seek_no;
+                playing_track_info.seeking_duration = None;
 
                 if let Some(SeekCompleteFromVeSignal {
                     ui_to_ve_signal_sender,
@@ -596,6 +581,13 @@ impl App {
                         ve_read_exclusive: None,
                     });
                     //self.app_state_container.play_state = PlayState::Playing(idx);
+                }
+
+                if let Some(PlayerRequestState::Seek(seek_no_reqeust_state)) =
+                    self.app_state_container.player_request_state
+                    && seek_no_reqeust_state == seek_no
+                {
+                    self.app_state_container.player_request_state = None;
                 }
             }
         }
@@ -731,7 +723,12 @@ impl App {
             return;
         };
 
-        let carib_duration = playing_track_info.get_carib_duration();
+        let carib_duration = if let Some(seeking_duration) = playing_track_info.seeking_duration {
+            seeking_duration
+        } else {
+            playing_track_info.get_carib_duration()
+        };
+
         let reqest_pos = carib_duration + move_amout;
         if reqest_pos > playing_track_info.track_duraion {
             Self::play_next(app_state_container);
@@ -745,6 +742,9 @@ impl App {
         let Some(ref mut playing_track_info) = app_state_container.playing_track_info else {
             return;
         };
+        if let Some(PlayerRequestState::VeSwitching) = app_state_container.player_request_state {
+            return;
+        }
 
         let Some(PlayerThread {
             ref mut player_control_singnal_sender,
@@ -753,11 +753,15 @@ impl App {
         else {
             return;
         };
-        app_state_container.seek_no.add_assign(1);
+        let new_seek_no = app_state_container.seek_no.add(1);
+        app_state_container.seek_no = new_seek_no;
         // app_state_container.play_state = PlayState::Seeking(playing_idx);
+        app_state_container.player_request_state = Some(PlayerRequestState::Seek(new_seek_no));
+        playing_track_info.seeking_duration = Some(reqest_pos);
+
         player_control_singnal_sender.send(PlayerControlSignal::Seek(UiToPlayerSeekSignal {
             target_duration: reqest_pos,
-            seek_no: app_state_container.seek_no,
+            seek_no: new_seek_no,
         }));
     }
 

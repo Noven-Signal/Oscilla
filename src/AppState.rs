@@ -10,7 +10,7 @@ pub mod AppState {
 
     use crate::AppState::AppState::VeSelectedTab::Oscilloscope;
     use crate::AudioFileInfo::AudioFileInfo;
-    use crate::app::{AppContorlSignal, Ves};
+    use crate::app::{AppContorlSignal, PlayerRequestState, Ves};
     use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
@@ -152,6 +152,7 @@ pub mod AppState {
         pub audio_device_sample_rate: usize,
         pub track_duraion: Duration,
         pub seek_completed_recieved_seek_no: u64,
+        pub seeking_duration: Option<Duration>,
         current_played_duration: Duration,
         audio_device_buffered_duration: Duration,
     }
@@ -168,7 +169,8 @@ pub mod AppState {
                 track_duraion,
                 current_played_duration: Duration::ZERO,
                 audio_device_buffered_duration: Duration::ZERO,
-                seek_completed_recieved_seek_no: 0
+                seek_completed_recieved_seek_no: 0,
+                seeking_duration: None
             }
         }
 
@@ -296,7 +298,8 @@ pub mod AppState {
         pub wait_next_tack_idx: Option<usize>,
         pub app_control_signal_sender: UnboundedSender<AppContorlSignal>,
         pub seek_no: u64,
-        pub played_frame_buffer: Option<u32>
+        pub played_frame_buffer: Option<u32>,
+        pub player_request_state: Option<PlayerRequestState>,
     }
 
     impl AppStateContainer {
@@ -328,7 +331,8 @@ pub mod AppState {
                 wait_next_tack_idx: None,
                 app_control_signal_sender,
                 seek_no: 0,
-                played_frame_buffer: None
+                played_frame_buffer: None,
+                player_request_state: None
             }
         }
     }
