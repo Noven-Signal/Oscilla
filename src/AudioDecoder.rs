@@ -101,7 +101,7 @@ pub fn decode_loop(
             );
         };
 
-    let get_threshold_len = |resample_container: &Option<ResampleContainer>| {
+    let get_block_size_before_resampler = |resample_container: &Option<ResampleContainer>| {
         if let Some(x) = resample_container {
             x.decode_tmp_block[0].len()
         } else {
@@ -115,6 +115,7 @@ pub fn decode_loop(
     let mut end_of_stream_reached = false;
 
     let mut current_played_sample: u64 = 0;
+    let mut last_seeked_sample: u64 = 0;
 
     let Some(file_sample_rate) = decoder_wrapper.get_sample_rate() else {
         return;
@@ -123,10 +124,11 @@ pub fn decode_loop(
     let Ok(file_sample_rate) = SampleRate::try_from(file_sample_rate as usize) else {
         return;
     };
-    let get_block_count = |current_played_sample: u64,resample_container: &Option<ResampleContainer>| {
-        let block_size = get_threshold_len(resample_container);
-        current_played_sample /block_size as u64
-    };
+    let get_block_count =
+        |current_played_sample: u64, resample_container: &Option<ResampleContainer>| {
+            let block_size = get_block_size_before_resampler(resample_container);
+            current_played_sample / block_size as u64
+        };
 
     struct ResampleContainer {
         decode_tmp_block: [Vec<f32>; 2],
@@ -164,15 +166,16 @@ pub fn decode_loop(
             })
         };
 
-    let get_block_size = || match resample_container {
+    let get_block_size_after_resampler = || match resample_container {
         Some(ref x) => x.block_size,
         None => BLOCK_SIZE_DEFAULT,
     };
 
-    let mut type_conversion_buff: [Vec<f32>; CHANNEL] = array_init(|| vec![0f32; get_block_size()]);
+    let mut type_conversion_buff: [Vec<f32>; CHANNEL] =
+        array_init(|| vec![0f32; get_block_size_after_resampler()]);
 
     for i in 0..shared_buffer.len() {
-        shared_buffer[i] = array_init(|| vec![0f32; get_block_size()]);
+        shared_buffer[i] = array_init(|| vec![0f32; get_block_size_after_resampler()]);
     }
 
     macro_rules! get_exclusizebuff {
@@ -227,12 +230,18 @@ pub fn decode_loop(
                     }
 
                     let ve_buffer_duration_offset_sec = {
-                        let target_block_count =
-                            get_block_count(current_played_sample,&resample_container) as i32 + len as i32 + 1
-                                - NUM_OF_BLOCK as i32;
+                        let after_seek_block_count = get_block_count(
+                            current_played_sample - last_seeked_sample,
+                            &resample_container,
+                        ) as i32
+                            + len as i32
+                            + 1
+                            - NUM_OF_BLOCK as i32;
 
-                        let target_duration = (target_block_count as f64 * get_block_size() as f64)
-                            / audio_device_sample_rate.rawValue() as f64;
+                        let target_duration = ((after_seek_block_count as f64
+                            * get_block_size_before_resampler(&resample_container) as f64)
+                            + last_seeked_sample as f64)
+                            / file_sample_rate.rawValue() as f64;
 
                         target_duration
                     };
@@ -288,18 +297,20 @@ pub fn decode_loop(
                             ve_to_decoder_signal_recv: ve_to_decoder_sync_signal_recv,
                         });
                     }
-                    let mut seek = || {
+                    let actual_ts_sec_f64 = {
                         let seeked = decoder_wrapper.seek(target_duration);
 
                         let convert_sample_count_to_sec_f64 =
                             |ts| ts as f64 / file_sample_rate.rawValue() as f64;
 
+                        write_exclusive = 0;
+                        head = 0;
+                        end_of_stream_reached = false;
+
                         match seeked {
                             Ok(SeekedTo { actual_ts, .. }) => {
-                                write_exclusive = 0;
-                                head = 0;
-                                end_of_stream_reached = false;
                                 current_played_sample = actual_ts;
+                                last_seeked_sample = actual_ts;
                                 convert_sample_count_to_sec_f64(actual_ts)
                             }
                             Err(x) => {
@@ -308,7 +319,6 @@ pub fn decode_loop(
                             }
                         }
                     };
-                    let actual_ts_sec_f64 = seek();
 
                     sync_obj.complete_sync.wait(sync_obj_increment);
                     let signal = SeekCompleteFromDecoderSignal {
@@ -346,7 +356,10 @@ pub fn decode_loop(
             let target_len = head + view[0].len();
 
             use std::cmp::Ordering::*;
-            match Ord::cmp(&target_len, &get_threshold_len(&resample_container)) {
+            match Ord::cmp(
+                &target_len,
+                &get_block_size_before_resampler(&resample_container),
+            ) {
                 Less => {
                     fill_buff_within_block(get_exclusizebuff!());
                     head = head + view[0].len();
