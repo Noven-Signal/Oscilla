@@ -589,6 +589,8 @@ impl App {
                 {
                     self.app_state_container.player_request_state = None;
                 }
+
+                self.render();
             }
         }
         Ok(())
@@ -662,7 +664,15 @@ impl App {
                         TabState::None => {}
                     }
                 }
-                _ => {}
+                key_code => {
+                    let app_state_container = &mut self.app_state_container;
+                    match app_state_container.focus_state {
+                        TabState::Selected(tabs) => {
+                            tabs.handle_key(&mut self.app_state_container, key_code);
+                        }
+                        _ => {}
+                    }
+                }
             },
             _ => {}
         };
