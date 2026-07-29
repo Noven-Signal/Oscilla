@@ -1,5 +1,6 @@
+use color_eyre::owo_colors::OwoColorize;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, List, ListDirection, ListState, Widget};
+use ratatui::widgets::{Block, Clear, List, ListDirection, ListState, Widget};
 
 use crate::AppState::AppState::{AppStateContainer, TabState, Tabs};
 use crate::extensions::OnceLock::OnceLock_ext;
@@ -7,6 +8,7 @@ use crate::extensions::Rect::RectExtension;
 use crate::extensions::SelectBlock::SelectedBlock;
 use crate::widgets::BottomPart::BottomPart;
 
+use crate::widgets::Popup::Popup;
 use crate::widgets::{EffectArea::*, ListArea::*};
 use crate::{AppState, get_decorated_border};
 
@@ -32,5 +34,28 @@ impl StatefulWidget for AppRoot {
         ListArea::default().render(list_area, buf, state);
         EffectArea::default().render(effect_area, buf, state);
         BottomPart::default().render(bottom, buf, state);
+
+        if state.popup_object.is_some() {
+            let [_, horizonal_center, _] = area.layout(
+                &Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Fill(1),
+                        Constraint::Length(40),
+                        Constraint::Fill(1),
+                    ]),
+            );
+            let [_, popup, _] = horizonal_center.layout(
+                &Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Fill(1),
+                        Constraint::Length(7),
+                        Constraint::Fill(1),
+                    ]),
+            );
+            Clear::default().render(popup, buf);
+            Popup::default().render(popup, buf, state);
+        }
     }
 }

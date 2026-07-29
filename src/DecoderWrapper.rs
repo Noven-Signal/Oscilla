@@ -28,16 +28,16 @@ pub enum DecodeInitError {
     SeekError(symphonia::core::errors::Error),
 }
 
-// 1. Implement Display for user-friendly messages
 impl Display for DecodeInitError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            _ => write!(f, "No Default Track is found "),
+            Self::NoTrackFound => write!(f, "No Default Track is found "),
+            Self::FileOpenFailed => write!(f, "FileOpenFailed"),
+            Self::SeekError(error) => write!(f, "seek error: {error}")
         }
     }
 }
 
-// 2. Implement the Error trait
 impl Error for DecodeInitError {}
 
 pub struct DecoderWrapper {

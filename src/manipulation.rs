@@ -1,6 +1,6 @@
 use std::{
     convert::TryFrom,
-    fmt::Debug,
+    fmt::{self, Debug, Display},
     ops::AddAssign,
     panic,
     path::Path,
@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    AudioDecoder::{BLOCK_SIZE_DEFAULT, decode_loop},
+    AudioDecoder::{BLOCK_SIZE_DEFAULT, DecodeLoopError, decode_loop},
     AudioOutput,
     DecoderWrapper::DecoderWrapper,
     app::{PlayerToUISingnal, PlayerToUISingnalVeEnabled, SeekCompleteSignal, TrackInfo},
@@ -146,7 +146,7 @@ pub struct SeekCompleteFromVeSignal {
 pub struct SeekCompleteFromDecoderSignal {
     pub actual_seek_duration_sec: f64,
     pub seek_no: u64,
-    pub ve_enabled: bool
+    pub ve_enabled: bool,
 }
 
 pub enum WorkerToPlayerNotification {
@@ -155,6 +155,7 @@ pub enum WorkerToPlayerNotification {
     NoticeAudioDeviceInfo(AudioDeviceInfo),
     SeekCompleteFromVe(SeekCompleteFromVeSignal),
     SeekCompleteFromDecoder(SeekCompleteFromDecoderSignal),
+    Error,
 }
 pub struct VeEnabledInfoFromDecoder {
     pub audio_device_sample_rate: usize,
@@ -252,26 +253,48 @@ pub const BACK_ROOM: usize = 4;
 pub const NUM_OF_BLOCK_VE: usize = 180;
 pub const AUDIO_OUTPUT_BUFFER_DURATION: Duration = Duration::from_secs(1);
 
+#[derive(Debug, Clone)]
+pub struct PlayerExecutorError {
+    pub error_message: String,
+}
+impl PlayerExecutorError {
+    fn new(error_message: &str) -> Self {
+        Self {
+            error_message: error_message.to_string(),
+        }
+    }
+}
+
+impl Display for PlayerExecutorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.error_message)
+    }
+}
+
+impl std::error::Error for PlayerExecutorError {}
+
 pub async fn play_executor(
     playback_file_path: &str,
     init_vol: u16,
     player_control_signal_recv: &mut UnboundedReceiver<PlayerControlSignal>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
-) {
+) -> Result<(), PlayerExecutorError> {
     let mut decoder_wrapper = match DecoderWrapper::new(playback_file_path) {
         Ok(d) => d,
-        Err(_) => todo!(),
+        Err(err) => {
+            return Err(PlayerExecutorError::new(&err.to_string()));
+        }
     };
 
     let file_sample_rate = {
         let Some(file_sample_rate) = decoder_wrapper.get_sample_rate() else {
-            return;
+            return Err(PlayerExecutorError::new("sample_rate get failed"));
         };
         file_sample_rate as usize
     };
 
     let Some(track_duration) = decoder_wrapper.get_duration() else {
-        return;
+        return Err(PlayerExecutorError::new("get duration failed"));
     };
 
     let (renderer_to_decoder_sender, renderer_to_docoder_reciever) = mpsc::unbounded_channel();
@@ -313,7 +336,7 @@ pub async fn play_executor(
             return;
         };
 
-        decode_loop(
+        if let Err(err) = decode_loop(
             &mut decoder_wrapper,
             shared_buffer,
             renderer_sample_rate,
@@ -322,7 +345,9 @@ pub async fn play_executor(
             decoder_control_signal_recv,
             worker_to_player_notofication_signal_sender,
             player_to_ui_singnal_for_decoder,
-        );
+        ) {
+            info!("decode_loop error: {err}");
+        }
     });
 
     for _ in 0..NUM_OF_BLOCK - 2 - BACK_ROOM {
@@ -434,7 +459,10 @@ pub async fn play_executor(
     let renderer_handle = tokio::task::spawn_blocking(move || {
         let shared_buffer = unsafe { retrieve_ref(&shared_buffer_for_renderer) };
 
-        AudioOutput::main(
+        let worker_to_player_notofication_signal_sender_for_renderer_clone =
+            worker_to_player_notofication_signal_sender_for_renderer.clone();
+
+        let res = AudioOutput::main(
             shared_buffer,
             renderer_to_decoder_sender,
             decoder_to_renderer_reciever,
@@ -442,30 +470,41 @@ pub async fn play_executor(
             player_to_ui_singnal,
             worker_to_player_notofication_signal_sender_for_renderer,
             init_vol,
-        )
-        .unwrap();
+        );
+
+        if let Err(err) = res {
+            _ = worker_to_player_notofication_signal_sender_for_renderer_clone
+                .send(WorkerToPlayerNotification::Error);
+            return Err(PlayerExecutorError {
+                error_message: err.message(),
+            });
+        }
+        Ok(())
         //let res = res.ok();
     });
+
+    let player_control_signal_loop_task_cancellation_token = CancellationToken::new();
+    let player_control_signal_loop_task_cancellation_token_for_worker_notification =
+        player_control_signal_loop_task_cancellation_token.clone();
 
     let player_control_signal_loop_task = async {
         enum VeEnabledRquestRecivedState {
             VeEnabled,
             VeDisabled,
         }
-        impl VeEnabledRquestRecivedState {
-            pub fn to_bool(&self) -> bool {
-                match self {
-                    VeEnabledRquestRecivedState::VeEnabled => true,
-                    VeEnabledRquestRecivedState::VeDisabled => false,
-                }
-            }
-        }
         let mut ve_enabled_request_recvied_state = VeEnabledRquestRecivedState::VeDisabled;
+        let cancellation_token =
+            player_control_signal_loop_task_cancellation_token_for_worker_notification;
+
         'l1: loop {
-            let message = match player_control_signal_recv.recv().await {
-                Some(msg) => msg,
-                None => break 'l1,
+            let message = tokio::select! {
+                _ = cancellation_token.cancelled() => break 'l1,
+                signal = player_control_signal_recv.recv() => match signal {
+                    Some(msg) => msg,
+                    None => break 'l1,
+                }
             };
+
             match message {
                 PlayerControlSignal::SetVol(vol) => {
                     renderer_control_signal_sender.send(RendererControlSignal::SetVol(vol));
@@ -603,9 +642,14 @@ pub async fn play_executor(
                 }
             };
         }
+        info!("exit_player_control_signal_loop_task");
     };
 
-    let player_notification_loop_task = async {
+    let renderer_control_signal_sender = &renderer_control_signal_sender;
+    let decoder_control_signal_sender = &decoder_control_signal_sender;
+    let ve_control_signal_sender = &ve_control_signal_sender;
+
+    let player_notification_loop_task = async move {
         let mut disabled_count = 0;
         let mut seek_ve_completed_signal: Option<SeekCompleteFromVeSignal> = None;
         let mut seek_decoder_completed_signal: Option<SeekCompleteFromDecoderSignal> = None;
@@ -692,6 +736,15 @@ pub async fn play_executor(
                     }
                     seek_decoder_completed_signal = Some(signal);
                 }
+                Some(WorkerToPlayerNotification::Error) => {
+                    renderer_control_signal_sender.send(RendererControlSignal::Stop);
+                    decoder_control_signal_sender.send(DecoderControlSignal::Stop);
+                    ve_control_signal_sender.send(VeControlSignal::Stop);
+
+                    info!("WorkerToPlayerNotification::Error");
+                    player_control_signal_loop_task_cancellation_token.cancel();
+                    break 'l2;
+                }
                 None => break 'l2,
             };
 
@@ -709,13 +762,31 @@ pub async fn play_executor(
                 player_to_ui_singnal_sender.send(PlayerToUISingnal::SeekComplete(signal));
             }
         }
+
+        info!("player_notification_loop_task");
     };
 
-    tokio::join!(
+    let res = tokio::join!(
         player_control_signal_loop_task,
         player_notification_loop_task,
         renderer_handle,
         decoder_handle,
         visual_effect_handle
     );
+
+    let defauilt_value = Err(PlayerExecutorError {
+        error_message: "thread_error".to_string(),
+    });
+    let arr: [Result<(), PlayerExecutorError>; _] = [res.2.map_or(defauilt_value, |x| x)];
+
+    match arr.iter().find(|x| x.is_err()) {
+        Some(result) => {
+            info!("EXIT_FINAL_1");
+            result.clone()
+        }
+        None => {
+            info!("EXIT_FINAL_2");
+            Ok(())
+        }
+    }
 }

@@ -53,7 +53,7 @@ pub fn main(
             }),
         );
 
-        audio_output.start();
+        audio_output.start()?;
     }
     Ok(())
 }
@@ -152,17 +152,16 @@ impl<'a> AudioOutput<'a> {
         // Default playback device
         let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
 
-        let device_list = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE);
-        let prop = device_list
-            .unwrap()
-            .Item(0)
-            .unwrap()
-            .OpenPropertyStore(STGM_READ);
-        // let count = device_list.unwrap().GetCount();
+        // let device_list = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE);
+        // let prop = device_list
+        //     .unwrap()
+        //     .Item(0)
+        //     .unwrap()
+        //     .OpenPropertyStore(STGM_READ);
 
-        use windows::Win32::Devices::FunctionDiscovery::*;
-        let mut ptr = PKEY_Device_FriendlyName;
-        let pro_varant = prop.unwrap().GetValue(&ptr);
+        // use windows::Win32::Devices::FunctionDiscovery::*;
+        // let mut ptr = PKEY_Device_FriendlyName;
+        // let pro_varant = prop.unwrap().GetValue(&ptr);
         //println!("{}", pro_varant.unwrap());
         // let v = prop.unwrap().GetValue(*PROPERTYKEY::QUERY);
         // Activate IAudioClient
@@ -171,11 +170,6 @@ impl<'a> AudioOutput<'a> {
         let wave_format_ptr = audio_client.GetMixFormat()?;
 
         let wave_format: WAVEFORMATEX = *wave_format_ptr;
-
-        let sample_rate = wave_format.nSamplesPerSec as f64;
-        let channels = wave_format.nChannels as usize;
-        let bits = wave_format.wBitsPerSample;
-        let format_tag = wave_format.wFormatTag;
 
         audio_client.Initialize(
             AUDCLNT_SHAREMODE_SHARED,
@@ -187,7 +181,7 @@ impl<'a> AudioOutput<'a> {
         )?;
         CoTaskMemFree(Some(wave_format_ptr as _));
 
-        audio_client.SetEventHandle(event_handle);
+        audio_client.SetEventHandle(event_handle)?;
         Ok(audio_client)
     }
 
@@ -331,14 +325,7 @@ impl<'a> AudioOutput<'a> {
             let available = cmp::min(os_available, get_block_len(read_exclusive));
 
             let output_buffer = {
-                let ptr = self.render_client.GetBuffer(available as u32);
-                let ptr = match ptr {
-                    Err(e) => {
-                        dbg!(e);
-                        panic!();
-                    }
-                    x => x.unwrap(),
-                };
+                let ptr = self.render_client.GetBuffer(available as u32)?;
                 unsafe { std::slice::from_raw_parts_mut(ptr as *mut f32, available * CHANNEL) }
             };
 

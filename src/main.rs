@@ -4,17 +4,18 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
     AppState::AppState::{AppStateContainer, PlayState},
-    app::{App, AppContorlSignal},
+    app::{App, AppContorlSignal, PopupObject},
     manipulation::PlayerControlSignal,
     widgets::AppRoot::*,
 };
 
 mod AppState;
 mod AudioDecoder;
+mod AudioFileInfo;
 mod AudioOutput;
-mod ResamplerWrapper;
 mod DecoderWrapper;
 mod MyDefMacro;
+mod ResamplerWrapper;
 mod action;
 mod app;
 mod cli;
@@ -28,7 +29,6 @@ mod tui;
 mod utils;
 mod visual_effects;
 mod widgets;
-mod AudioFileInfo;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -58,11 +58,18 @@ async fn main() -> color_eyre::Result<()> {
         .filter(|arg| arg != current_exe_path)
         .collect::<Vec<String>>();
 
-    let (app_control_signal_sender,app_control_signal_recv) = unbounded_channel::<AppContorlSignal>();
+    let (app_control_signal_sender, app_control_signal_recv) =
+        unbounded_channel::<AppContorlSignal>();
+    let (popup_queue_signal_sender, popup_queue_signal_recv) = unbounded_channel::<PopupObject>();
 
-    let app_state_container = AppStateContainer::new(app_control_signal_sender,filtered_args);
+    let app_state_container = AppStateContainer::new(app_control_signal_sender,popup_queue_signal_sender, filtered_args);
 
-    let mut app = App::new(AppRoot::default(), app_state_container,app_control_signal_recv)?;
+    let mut app = App::new(
+        AppRoot::default(),
+        app_state_container,
+        app_control_signal_recv,
+        popup_queue_signal_recv
+    )?;
     app.run().await?;
 
     Ok(())

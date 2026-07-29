@@ -4,10 +4,10 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 #[derive(Default)]
 pub struct Margin {
-    left: u16,
-    right: u16,
-    top: u16,
-    bottom: u16,
+    pub left: u16,
+    pub right: u16,
+    pub top: u16,
+    pub bottom: u16,
 }
 impl Margin {
     pub const fn default() -> Self {

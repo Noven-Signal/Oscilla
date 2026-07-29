@@ -19,14 +19,14 @@ use crate::{
     app,
     manipulation::{
         self, AudioDeviceInfo, DecoderControlSignal::VeDisabled, NUM_OF_BLOCK_VE, OscilloscopeData,
-        PlayerControlSignal, SeekCompleteFromVeSignal, UiToPlayerSeekSignal, UiVEThreadSyncSignal,
-        VESharedBuffer,
+        PlayerControlSignal, PlayerExecutorError, SeekCompleteFromVeSignal, UiToPlayerSeekSignal,
+        UiVEThreadSyncSignal, VESharedBuffer,
     },
     tui::Tui,
     utils::array_init,
-    widgets::AppRoot::AppRoot,
+    widgets::{AppRoot::AppRoot, Popup::Popup},
 };
-use color_eyre::eyre::Ok;
+use color_eyre::{eyre::Ok, owo_colors::OwoColorize};
 use crossterm::event::Event as CrosstermEvent;
 use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::{FutureExt, StreamExt, channel::mpsc::unbounded, future};
@@ -37,7 +37,7 @@ use tokio::{
     io::join,
     join, pin,
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
-    task::JoinHandle,
+    task::{JoinError, JoinHandle},
     time::Interval,
 };
 use tokio_util::sync::CancellationToken;
@@ -69,6 +69,7 @@ pub struct App {
     ve_switcher_sync_signal_recv: UnboundedReceiver<VeSwitcherSyncSignal>,
     player_to_ui_signal_recv: Option<UnboundedReceiver<PlayerToUISingnal>>,
     app_control_signal_recv: UnboundedReceiver<AppContorlSignal>,
+    popup_queue_signal_recv: UnboundedReceiver<PopupObject>,
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -116,11 +117,27 @@ pub struct PlayerToUISingnalVeEnabled {
     pub ve_buffer_duration_offset_sec: f64,
 }
 
+pub struct PopupObject {
+    pub title: String,
+    pub message: String,
+    pub button_name: String,
+}
+impl PopupObject {
+    pub fn new(message: String) -> Self {
+        Self {
+            title: "ERROR".to_string(),
+            message,
+            button_name: "OK".to_string(),
+        }
+    }
+}
+
 impl App {
     pub fn new(
         root_wiget: AppRoot,
         app_state_container: AppStateContainer,
         app_control_signal_recv: UnboundedReceiver<AppContorlSignal>,
+        popup_queue_signal_recv: UnboundedReceiver<PopupObject>,
     ) -> color_eyre::Result<Self> {
         let (ve_switcher_request_signal_sender, ve_switcher_request_signal_recv) =
             unbounded_channel();
@@ -134,6 +151,7 @@ impl App {
             ve_switcher_sync_signal_recv: ve_switcher_request_signal_recv,
             player_to_ui_signal_recv: None,
             app_control_signal_recv,
+            popup_queue_signal_recv,
         })
     }
 
@@ -155,16 +173,15 @@ impl App {
         let init_vol = app_state_container.vol_state;
         let player_handle = tokio::spawn(async move {
             let Some(target_track) = play_list_arc.get(idx) else {
-                return;
+                return Result::Ok(());
             };
-
             manipulation::play_executor(
                 &target_track.file_path,
                 init_vol,
                 &mut player_control_signal_recv,
                 player_to_ui_signal_sender,
             )
-            .await;
+            .await
         });
 
         app_state_container.player_thread = Some(PlayerThread {
@@ -198,7 +215,10 @@ impl App {
         }) = &mut self.app_state_container.player_thread
         {
             player_control_singnal_sender.send(PlayerControlSignal::Stop);
-            handle.await?;
+            let player_result = handle.await?;
+            if let Err(err) = player_result {
+                self.app_state_container.popup_object = Some(PopupObject::new(err.error_message));
+            }
         }
 
         self.tui.exit()?;
@@ -282,13 +302,16 @@ impl App {
             }
 
             tokio::select! {
+                Some(signal) = self.popup_queue_signal_recv.recv() => {
+                    self.app_state_container.popup_object = Some(signal);
+                }
                 Some(signal) = self.app_control_signal_recv.recv() => {
                     match signal {
                         AppContorlSignal::StartPlayer(idx) => {
                            before_start_player_clean_up_statement!();
 
                             self.start_player(idx);
-                        },
+                        }
                     }
                 }
                 Some(signal) = async{
@@ -351,12 +374,20 @@ impl App {
                         None => {},
                     }
                 },
-                _ = async{
+                player_result = async{
                     match &mut self.app_state_container.player_thread{
                         Some(PlayerThread { handle, .. }) => handle.await,
                         None => future::pending().await,
                     }
                 } => {
+                    match player_result {
+                        Result::Ok(Result::Ok(_)) => {}
+                        Result::Ok(Result::Err(err)) => {
+                            self.app_state_container.popup_object = Some(PopupObject::new(err.error_message))
+                        }
+                        Err(_) => panic!(),
+                    }
+
                     self.handle_player_thread_completed();
 
                     _ = self.render();
@@ -593,27 +624,28 @@ impl App {
                 self.render();
             }
         }
+
         Ok(())
     }
 
     async fn handle_key_event(&mut self, key: KeyEvent) -> color_eyre::Result<()> {
         use AppState::AppState::*;
 
-        let mut move_key_pressed_handler = |key_code: KeyCode| {
-            let app_state_container = &mut self.app_state_container;
-            match app_state_container.focus_state {
-                TabState::Focused(_) | TabState::None => {
-                    let next = (app_state_container.focus_state).get_focus_tab(key_code);
-                    app_state_container.focus_state = match next {
-                        Some(next) => TabState::Focused(next),
-                        None => TabState::None,
+        let mut move_key_pressed_handler =
+            |key_code: KeyCode, app_state_container: &mut AppStateContainer| {
+                match app_state_container.focus_state {
+                    TabState::Focused(_) | TabState::None => {
+                        let next = (app_state_container.focus_state).get_focus_tab(key_code);
+                        app_state_container.focus_state = match next {
+                            Some(next) => TabState::Focused(next),
+                            None => TabState::None,
+                        }
+                    }
+                    TabState::Selected(tabs) => {
+                        tabs.handle_key(app_state_container, key_code);
                     }
                 }
-                TabState::Selected(tabs) => {
-                    tabs.handle_key(&mut self.app_state_container, key_code);
-                }
-            }
-        };
+            };
 
         match key {
             KeyEvent {
@@ -636,8 +668,11 @@ impl App {
                 kind: KeyEventKind::Press,
                 ..
             } => match code {
+                code if self.app_state_container.popup_object.is_some() => {
+                    Popup::handle_key(&mut self.app_state_container, code);
+                }
                 KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
-                    move_key_pressed_handler(code)
+                    move_key_pressed_handler(code, &mut self.app_state_container)
                 }
                 KeyCode::Enter => {
                     //  let app_state_container = &mut self.app_state_container;

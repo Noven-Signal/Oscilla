@@ -1,5 +1,7 @@
 pub mod AppState {
+    use std::fmt::Debug;
     use std::ops::Index;
+    use std::slice::Iter;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
 
@@ -10,8 +12,9 @@ pub mod AppState {
 
     use crate::AppState::AppState::VeSelectedTab::Oscilloscope;
     use crate::AudioFileInfo::AudioFileInfo;
-    use crate::app::{AppContorlSignal, PlayerRequestState, Ves};
-    use crate::manipulation::{PlayerControlSignal, UiVEThreadSyncSignal, VESharedBuffer};
+    use crate::app::{AppContorlSignal, PlayerRequestState, PopupObject, Ves};
+    use crate::manipulation::{PlayerControlSignal, PlayerExecutorError, UiVEThreadSyncSignal, VESharedBuffer};
+    use crate::utils::array_init;
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
     use crate::widgets::DurationBarArea::DurationBarArea;
@@ -170,7 +173,7 @@ pub mod AppState {
                 current_played_duration: Duration::ZERO,
                 audio_device_buffered_duration: Duration::ZERO,
                 seek_completed_recieved_seek_no: 0,
-                seeking_duration: None
+                seeking_duration: None,
             }
         }
 
@@ -276,7 +279,7 @@ pub mod AppState {
     }
 
     pub struct PlayerThread {
-        pub handle: JoinHandle<()>,
+        pub handle: JoinHandle<Result<(), PlayerExecutorError>>,
         pub player_control_singnal_sender: UnboundedSender<PlayerControlSignal>,
     }
 
@@ -300,19 +303,50 @@ pub mod AppState {
         pub seek_no: u64,
         pub played_frame_buffer: Option<u32>,
         pub player_request_state: Option<PlayerRequestState>,
+        pub popup_object: Option<PopupObject>,
     }
 
     impl AppStateContainer {
         pub fn new(
             app_control_signal_sender: UnboundedSender<AppContorlSignal>,
+            popup_queue_signal_sender: UnboundedSender<PopupObject>,
             list: Vec<String>,
         ) -> Self {
             let (ve_switcher_request_signal_sender, ve_switcher_request_signal_recv) =
                 unbounded_channel();
-            let play_list = list
-                .iter()
-                .map(|path| AudioFileInfo::new(path)) // comment to prevent formatter to single liner
-                .collect();
+
+            let (play_list, error_list) = categorize_into_two::<AudioFileInfo, String>(
+                list.iter(),
+                |path, play_list, error_list| {
+                    match AudioFileInfo::new(path) {
+                        Ok(info) => play_list.push(info),
+                        Err(_) => error_list.push(path.clone()),
+                    };
+                },
+            );
+
+            fn categorize_into_two<T: Debug, U: Debug>(
+                input: Iter<'_, String>,
+                mut f: impl FnMut(&String, &mut Vec<T>, &mut Vec<U>),
+            ) -> (Vec<T>, Vec<U>) {
+                let mut x_0 = Vec::<T>::new();
+                let mut x_1 = Vec::<U>::new();
+
+                for ele in input {
+                    f(ele, &mut x_0, &mut x_1)
+                }
+                (x_0, x_1)
+            }
+
+            if !error_list.is_empty() {
+                let error_paths = error_list.join("\n");
+                let signal = PopupObject {
+                    title: "error".into(),
+                    message: format!("an error occurred during loading file: \n{error_paths}"),
+                    button_name: "OK".into(),
+                };
+                popup_queue_signal_sender.send(signal);
+            }
 
             Self {
                 focus_state: TabState::None,
@@ -332,7 +366,8 @@ pub mod AppState {
                 app_control_signal_sender,
                 seek_no: 0,
                 played_frame_buffer: None,
-                player_request_state: None
+                player_request_state: None,
+                popup_object: None,
             }
         }
     }

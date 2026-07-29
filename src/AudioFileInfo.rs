@@ -3,8 +3,9 @@ use std::path::Path;
 use symphonia::core::{meta::Tag, *};
 use tracing::info;
 
-use crate::DecoderWrapper::DecoderWrapper;
+use crate::DecoderWrapper::{DecodeInitError, DecoderWrapper};
 
+#[derive(Debug)]
 pub struct AudioFileInfo {
     pub file_path: String,
     pub title: Option<String>,
@@ -14,8 +15,8 @@ pub struct AudioFileInfo {
 }
 
 impl AudioFileInfo {
-    pub fn new(path: &str) -> Self {
-        let mut decoder_wrapper = DecoderWrapper::new(path).expect("decoder init error");
+    pub fn new(path: &str) -> Result<Self,DecodeInitError> {
+        let mut decoder_wrapper = DecoderWrapper::new(path)?;
 
         let mapper = |tags: &[Tag]| {
             let mut audio_file_info = AudioFileInfo {
@@ -63,7 +64,7 @@ impl AudioFileInfo {
             };
             audio_file_info
         };
-        decoder_wrapper.extract_file_info_map_into(mapper)
+        Ok(decoder_wrapper.extract_file_info_map_into(mapper))
     }
 
     pub fn get_disp_name(&self) -> &str {

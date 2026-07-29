@@ -1,4 +1,5 @@
 use std::{
+    fmt::{self, Display},
     ops::AddAssign,
     sync::atomic::Ordering,
     time::{self, Duration},
@@ -22,7 +23,37 @@ use crate::{
     utils::array_init,
 };
 
+
+
+
 pub const BLOCK_SIZE_DEFAULT: usize = 1024 * 16;
+
+#[derive(Debug)]
+pub enum DecodeLoopError {
+    SampleRateUnavailable,
+    UnsupportedSampleRate(usize),
+    ResamplerInit(String),
+    DecodeFailed(String),
+}
+
+impl Display for DecodeLoopError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SampleRateUnavailable => write!(f, "sample rate is unavailable"),
+            Self::UnsupportedSampleRate(rate) => write!(f, "unsupported sample rate: {rate}"),
+            Self::ResamplerInit(error) => write!(f, "resampler init failed: {error}"),
+            Self::DecodeFailed(error) => write!(f, "decode failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for DecodeLoopError {}
+
+impl From<color_eyre::eyre::Report> for DecodeLoopError {
+    fn from(error: color_eyre::eyre::Report) -> Self {
+        Self::ResamplerInit(error.to_string())
+    }
+}
 
 pub fn decode_loop(
     decoder_wrapper: &mut DecoderWrapper,
@@ -33,7 +64,7 @@ pub fn decode_loop(
     mut decoder_control_signal: UnboundedReceiver<DecoderControlSignal>,
     decoder_to_player_notification_signal: UnboundedSender<WorkerToPlayerNotification>,
     player_to_ui_singnal_sender: UnboundedSender<PlayerToUISingnal>,
-) {
+) -> Result<(), DecodeLoopError> {
     struct VeSignal {
         pub decoder_to_ve_signal_sender: UnboundedSender<DecorderToVeSyncSignal>,
         pub ve_to_decoder_signal_recv: UnboundedReceiver<VeToDecoderSyncSignal>,
@@ -118,11 +149,11 @@ pub fn decode_loop(
     let mut last_seeked_sample: u64 = 0;
 
     let Some(file_sample_rate) = decoder_wrapper.get_sample_rate() else {
-        return;
+        return Err(DecodeLoopError::SampleRateUnavailable);
     };
 
     let Ok(file_sample_rate) = SampleRate::try_from(file_sample_rate as usize) else {
-        return;
+        return Err(DecodeLoopError::UnsupportedSampleRate(file_sample_rate as usize));
     };
     let get_block_count =
         |current_played_sample: u64, resample_container: &Option<ResampleContainer>| {
@@ -159,8 +190,7 @@ pub fn decode_loop(
                     file_sample_rate as usize,
                     audio_device_sample_rate.rawValue(),
                     base * multiple,
-                )
-                .unwrap(),
+                )?,
                 block_size: (decode_tmp_block * audio_device_sample_rate.rawValue())
                     / file_sample_rate.rawValue(),
             })
@@ -201,7 +231,6 @@ pub fn decode_loop(
             }
         };
         if end_of_stream_reached || !decoder_control_signal.is_empty() {
-            info!("decoder_control_signal.blocking_recv() ");
             match decoder_control_signal.blocking_recv() {
                 Some(DecoderControlSignal::Stop) => {
                     _ = singnal_to_thread_sync(
@@ -448,8 +477,7 @@ pub fn decode_loop(
                 _ => {}
             },
             DecodeResult::Err(error) => {
-                return;
-                //println!("error: {error}")
+                return Err(DecodeLoopError::DecodeFailed(error.to_string()));
             }
             DecodeResult::EndOfStream => {
                 // for channel_data_ref in &mut shared_buffer[write_exclusive] {
@@ -480,4 +508,6 @@ pub fn decode_loop(
             DecodeResult::None => continue,
         }
     }
+
+    Ok(())
 }
