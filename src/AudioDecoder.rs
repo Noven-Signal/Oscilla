@@ -223,13 +223,6 @@ pub fn decode_loop(
     }
 
     'l1: loop {
-        let get_block_size = || {
-            if let Some(ResampleContainer { block_size, .. }) = resample_container {
-                block_size
-            } else {
-                BLOCK_SIZE_DEFAULT
-            }
-        };
         if end_of_stream_reached || !decoder_control_signal.is_empty() {
             match decoder_control_signal.blocking_recv() {
                 Some(DecoderControlSignal::Stop) => {

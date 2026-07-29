@@ -15,7 +15,10 @@ use symphonia::{
     core::{io::MediaSourceStream, probe::Hint},
     default::get_probe,
 };
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::{
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender, unbounded_channel},
+    task::JoinError,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -333,8 +336,11 @@ pub async fn play_executor(
             renderer_sample_rate,
         }) = decoder_init_signal_recv.blocking_recv()
         else {
-            return;
+            return Ok(()); // abnormal case, but assuming other thread returns error,this thrad returns Ok.
         };
+
+        let worker_to_player_notofication_signal_sender_clone =
+            worker_to_player_notofication_signal_sender.clone();
 
         if let Err(err) = decode_loop(
             &mut decoder_wrapper,
@@ -346,8 +352,15 @@ pub async fn play_executor(
             worker_to_player_notofication_signal_sender,
             player_to_ui_singnal_for_decoder,
         ) {
+            _ = worker_to_player_notofication_signal_sender_clone
+                .send(WorkerToPlayerNotification::Error);
             info!("decode_loop error: {err}");
+            return Err(PlayerExecutorError {
+                error_message: err.to_string(),
+            });
         }
+
+        Ok(())
     });
 
     for _ in 0..NUM_OF_BLOCK - 2 - BACK_ROOM {
@@ -653,6 +666,16 @@ pub async fn play_executor(
         let mut disabled_count = 0;
         let mut seek_ve_completed_signal: Option<SeekCompleteFromVeSignal> = None;
         let mut seek_decoder_completed_signal: Option<SeekCompleteFromDecoderSignal> = None;
+
+        let handle_error_variant = || {
+            renderer_control_signal_sender.send(RendererControlSignal::Stop);
+            decoder_control_signal_sender.send(DecoderControlSignal::Stop);
+            ve_control_signal_sender.send(VeControlSignal::Stop);
+
+            info!("WorkerToPlayerNotification::Error");
+            player_control_signal_loop_task_cancellation_token.cancel();
+        };
+
         'l2: loop {
             match worker_to_player_notofication_signal_recv.recv().await {
                 Some(WorkerToPlayerNotification::VeEnabledInfo(ve_enabled_info)) => {
@@ -693,9 +716,26 @@ pub async fn play_executor(
                     sample_rate: audio_device_sample_rate,
                 })) => {
                     let (file_sample_rate, audio_device_sample_rate) = (
-                        SampleRate::try_from(file_sample_rate).expect("unsupported_sample_rate"),
-                        SampleRate::try_from(audio_device_sample_rate)
-                            .expect("unsupported_sample_rate"),
+                        match SampleRate::try_from(file_sample_rate) {
+                            Ok(value) => value,
+                            Err(rate) => {
+                                handle_error_variant();
+                                return Err(PlayerExecutorError::new(
+                                    &format!("unsupported file sample rate {rate}")
+                                        .into_boxed_str(),
+                                ));
+                            }
+                        },
+                        match SampleRate::try_from(audio_device_sample_rate) {
+                            Ok(value) => value,
+                            Err(rate) => {
+                                handle_error_variant();
+                                return Err(PlayerExecutorError::new(
+                                    &format!("unsupported audio_device sample rate {rate}")
+                                        .into_boxed_str(),
+                                ));
+                            }
+                        },
                     );
 
                     decoder_init_signal_sender.send(DecoderInitSignal {
@@ -737,12 +777,8 @@ pub async fn play_executor(
                     seek_decoder_completed_signal = Some(signal);
                 }
                 Some(WorkerToPlayerNotification::Error) => {
-                    renderer_control_signal_sender.send(RendererControlSignal::Stop);
-                    decoder_control_signal_sender.send(DecoderControlSignal::Stop);
-                    ve_control_signal_sender.send(VeControlSignal::Stop);
+                    handle_error_variant();
 
-                    info!("WorkerToPlayerNotification::Error");
-                    player_control_signal_loop_task_cancellation_token.cancel();
                     break 'l2;
                 }
                 None => break 'l2,
@@ -764,6 +800,8 @@ pub async fn play_executor(
         }
 
         info!("player_notification_loop_task");
+
+        Ok(())
     };
 
     let res = tokio::join!(
@@ -774,12 +812,18 @@ pub async fn play_executor(
         visual_effect_handle
     );
 
-    let defauilt_value = Err(PlayerExecutorError {
-        error_message: "thread_error".to_string(),
-    });
-    let arr: [Result<(), PlayerExecutorError>; _] = [res.2.map_or(defauilt_value, |x| x)];
+    let get_thread_error = |_: JoinError| {
+        Err(PlayerExecutorError {
+            error_message: "thread_error".to_string(),
+        })
+    };
+    let thread_ressults: [Result<(), PlayerExecutorError>; _] = [
+        res.1,
+        res.2.map_or_else(get_thread_error, |x| x),
+        res.3.map_or_else(get_thread_error, |x| x),
+    ];
 
-    match arr.iter().find(|x| x.is_err()) {
+    match thread_ressults.iter().find(|x| x.is_err()) {
         Some(result) => {
             info!("EXIT_FINAL_1");
             result.clone()
