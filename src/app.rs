@@ -295,6 +295,9 @@ impl App {
 
                     ve_switcher_requst_signal = None;
                     ve_switcher_sync_signal = None;
+
+                    self.app_state_container.player_request_state = None;
+
                     _ = self
                         .ve_switcher_sync_signal_sender
                         .send(VeSwitcherSyncSignal());
@@ -320,10 +323,10 @@ impl App {
                         None => future::pending().await,
                     }
                 } => self.handle_player_to_ui_signal(signal).await?,
-                crossterm_event = event_stream.next().fuse() => match crossterm_event {
-                    Some(Result::Ok(event)) => self.handle_crossterm_event(&event).await?,
-                    _ => break 'l1,
-                },
+                    crossterm_event = event_stream.next().fuse() => match crossterm_event {
+                        Some(Result::Ok(event)) => self.handle_crossterm_event(&event).await?,
+                        _ => break 'l1,
+                    },
                 _ = async{
                     let PlayState::Playing(_) = &self.app_state_container.play_state else{
                         return future::pending::<()>().await;
@@ -356,7 +359,7 @@ impl App {
                 } => {
                     match signal{
                         Some(signal) => {
-                    ve_switcher_requst_signal = Some(signal);
+                            ve_switcher_requst_signal = Some(signal);
                         },
                         None => {},
                     }
