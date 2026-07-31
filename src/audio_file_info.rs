@@ -2,7 +2,7 @@ use std::path::Path;
 
 use symphonia::core::{meta::Tag, *};
 
-use crate::DecoderWrapper::{DecodeInitError, DecoderWrapper};
+use crate::decoder_wrapper::{DecodeInitError, DecoderWrapper};
 
 #[derive(Debug)]
 pub struct AudioFileInfo {

@@ -7,11 +7,11 @@ use ratatui::{
     widgets::{Axis, Chart, Dataset, GraphType, StatefulWidget, Tabs, Widget},
 };
 use crate::{
-    AppState::AppState::{
+    app_state::app_state::{
         AppStateContainer, AreaHandler, PlayingTrackInfo, VeSelectedTab, VeSwitcherRequestSignal,
     },
     app::Ves,
-    extensions::Rect::RectExtension,
+    extensions::rect::RectExtension,
     get_decorated_border,
 };
 
@@ -23,7 +23,7 @@ impl StatefulWidget for EffectArea {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         get_decorated_border!(
             state.focus_state,
-            crate::AppState::AppState::Tabs::EffectArea
+            crate::app_state::app_state::Tabs::EffectArea
         )
         .render(area, buf);
 

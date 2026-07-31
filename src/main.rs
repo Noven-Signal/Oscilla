@@ -3,18 +3,18 @@ use std::path::Path;
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
-    AppState::AppState::AppStateContainer,
+    app_state::app_state::AppStateContainer,
     app::{App, AppContorlSignal, PopupObject},
-    widgets::AppRoot::*,
+    widgets::app_root::*,
 };
 
-mod AppState;
-mod AudioDecoder;
-mod AudioFileInfo;
-mod AudioOutput;
-mod DecoderWrapper;
-mod MyDefMacro;
-mod ResamplerWrapper;
+mod app_state;
+mod audio_decoder;
+mod audio_file_info;
+mod audio_output;
+mod decoder_wrapper;
+mod my_def_macro;
+mod resampler_wrapper;
 mod action;
 mod app;
 mod config;

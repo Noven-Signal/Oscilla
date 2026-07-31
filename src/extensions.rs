@@ -1,2 +1,2 @@
-pub mod Rect;
-pub mod SelectBlock;
+pub mod rect;
+pub mod select_block;

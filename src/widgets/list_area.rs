@@ -2,10 +2,10 @@ use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, HighlightSpacing, List, ListDirection, ListItem, Widget};
-use crate::AppState::AppState::{AppStateContainer, AreaHandler};
+use crate::app_state::app_state::{AppStateContainer, AreaHandler};
 use crate::app::App;
-use crate::extensions::Rect::RectExtension;
-use crate::{AppState, get_decorated_border};
+use crate::extensions::rect::RectExtension;
+use crate::{app_state, get_decorated_border};
 
 #[derive(Default)]
 pub struct ListArea {}
@@ -13,7 +13,7 @@ pub struct ListArea {}
 impl StatefulWidget for ListArea {
     type State = AppStateContainer;
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut AppStateContainer) {
-        use AppState::AppState::*;
+        use app_state::app_state::*;
 
         let block = get_decorated_border!(state.focus_state, Tabs::ListArea);
 

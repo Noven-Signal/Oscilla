@@ -1,4 +1,4 @@
-pub mod AppState {
+pub mod app_state {
     use std::fmt::Debug;
     use std::slice::Iter;
     use std::sync::Arc;
@@ -7,15 +7,15 @@ pub mod AppState {
     use ratatui::widgets::ListState;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
     use tokio::task::JoinHandle;
-    use crate::AudioFileInfo::AudioFileInfo;
+    use crate::audio_file_info::AudioFileInfo;
     use crate::app::{AppContorlSignal, PlayerRequestState, PopupObject, Ves};
     use crate::manipulation::{PlayerControlSignal, PlayerExecutorError, VESharedBuffer};
-    use crate::widgets::Button::{ButtonIdent, PlayButtonState};
-    use crate::widgets::ButtonArea::ButtonsArea;
-    use crate::widgets::DurationBarArea::DurationBarArea;
-    use crate::widgets::EffectArea::EffectArea;
-    use crate::widgets::ListArea::ListArea;
-    use crate::widgets::VolArea::VolArea;
+    use crate::widgets::button::{ButtonIdent, PlayButtonState};
+    use crate::widgets::button_area::ButtonsArea;
+    use crate::widgets::duration_bar_area::DurationBarArea;
+    use crate::widgets::effect_area::EffectArea;
+    use crate::widgets::list_area::ListArea;
+    use crate::widgets::vol_area::VolArea;
 
     #[derive(Clone, Copy, Debug)]
     pub enum TabState {

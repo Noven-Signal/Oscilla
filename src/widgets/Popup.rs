@@ -2,7 +2,7 @@ use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Paragraph, Widget, Wrap};
 
-use crate::AppState::AppState::AppStateContainer;
+use crate::app_state::app_state::AppStateContainer;
 use crate::app::PopupObject;
 
 #[derive(Default, Clone, Copy)]

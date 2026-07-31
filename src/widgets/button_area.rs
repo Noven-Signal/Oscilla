@@ -1,17 +1,17 @@
 use crate::app::App;
-use crate::extensions::Rect::RectExtension;
+use crate::extensions::rect::RectExtension;
 use crate::get_decorated_border;
 use crate::manipulation::PlayerControlSignal;
-use crate::widgets::Button::ButtonState;
+use crate::widgets::button::ButtonState;
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
-use crate::AppState::AppState::{
+use crate::app_state::app_state::{
     AppStateContainer, AreaHandler, PlayState, PlayerThread, TabState, Tabs,
 };
 
-use crate::widgets::Button::{Button, ButtonIdent};
+use crate::widgets::button::{Button, ButtonIdent};
 
 #[derive(Default)]
 pub struct ButtonsArea {}
@@ -97,7 +97,7 @@ impl AreaHandler for ButtonsArea {
 
                 _ = sender.send(player_control_signal);
 
-                use crate::AppState::AppState::PlayState::*;
+                use crate::app_state::app_state::PlayState::*;
                 *play_state = match play_state {
                     Playing(idx) => Paused(*idx),
                     Paused(idx) => Playing(*idx),

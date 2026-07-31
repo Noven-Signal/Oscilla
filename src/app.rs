@@ -1,8 +1,8 @@
 use std::{fmt::Debug, ops::Add, sync::atomic::AtomicPtr, time::Duration, usize};
 use crate::{
-    AppState::{
+    app_state::{
         self,
-        AppState::{
+        app_state::{
             AppStateContainer, PlayState, PlayerThread, PlayingTrackInfo, VeSelectedTab,
             VeSwitcherRequestSignal,
         },
@@ -13,7 +13,7 @@ use crate::{
     },
     tui::Tui,
     utils::array_init,
-    widgets::{AppRoot::AppRoot, Popup::Popup},
+    widgets::{app_root::AppRoot, popup::Popup},
 };
 use color_eyre::eyre::Ok;
 use crossterm::event::Event as CrosstermEvent;
@@ -427,7 +427,7 @@ impl App {
                 };
                 app_state_container.ve_shared_buffer = {
                     let move_window = playing_track_info.audio_device_sample_rate as usize
-                        / crate::visual_effects::Oscilloscope::FRAME_RATE;
+                        / crate::visual_effects::oscilloscope::FRAME_RATE;
                     let crate_move_window_size_vec =
                         || (0..move_window).map(|i| (i as f64, 0f64)).collect();
                     let arr = array_init(|| {
@@ -610,7 +610,7 @@ impl App {
     }
 
     async fn handle_key_event(&mut self, key: KeyEvent) -> color_eyre::Result<()> {
-        use AppState::AppState::*;
+        use app_state::app_state::*;
 
         let move_key_pressed_handler =
             |key_code: KeyCode, app_state_container: &mut AppStateContainer| {

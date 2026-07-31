@@ -8,8 +8,8 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::info;
 
 use crate::{
-    DecoderWrapper::{DecodeResult, DecoderWrapper},
-    ResamplerWrapper::RsamplerWrapper,
+    decoder_wrapper::{DecodeResult, DecoderWrapper},
+    resampler_wrapper::RsamplerWrapper,
     app::PlayerToUISingnal,
     manipulation::{
         CHANNEL, DecoderControlSignal, DecoderToRendererSyncSignal, DecorderToVeSyncSignal,

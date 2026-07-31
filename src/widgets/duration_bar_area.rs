@@ -10,9 +10,9 @@ use ratatui::{
 };
 
 use crate::{
-    AppState::AppState::{AppStateContainer, AreaHandler, TabState, Tabs},
+    app_state::app_state::{AppStateContainer, AreaHandler, TabState, Tabs},
     app::App,
-    extensions::Rect::RectExtension,
+    extensions::rect::RectExtension,
     get_decorated_border,
 };
 

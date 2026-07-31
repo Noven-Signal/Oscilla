@@ -17,12 +17,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    AudioDecoder::decode_loop,
-    AudioOutput,
-    DecoderWrapper::DecoderWrapper,
+    audio_decoder::decode_loop,
+    audio_output,
+    decoder_wrapper::DecoderWrapper,
     app::{PlayerToUISingnal, PlayerToUISingnalVeEnabled, SeekCompleteSignal, TrackInfo},
     utils::array_init,
-    visual_effects::Oscilloscope::{VeControlSignalInner, ve_loop},
+    visual_effects::oscilloscope::{VeControlSignalInner, ve_loop},
 };
 
 pub enum DecoderToRendererSyncSignal {
@@ -59,7 +59,7 @@ impl SeekTimingSyncObj {
         let mutex_guard = mutex.lock().unwrap();
         mutex_guard.fetch_add(increment, Ordering::SeqCst);
         drop(mutex_guard);
-        condvar
+        let _mutex_guard = condvar
             .wait_while(mutex.lock().unwrap(), |state| {
                 info!("{}", state.load(Ordering::SeqCst));
                 state.load(Ordering::SeqCst) < 3
@@ -462,7 +462,7 @@ pub async fn play_executor(
         let worker_to_player_notofication_signal_sender_for_renderer_clone =
             worker_to_player_notofication_signal_sender_for_renderer.clone();
 
-        let res = AudioOutput::main(
+        let res = audio_output::main(
             shared_buffer,
             renderer_to_decoder_sender,
             decoder_to_renderer_reciever,

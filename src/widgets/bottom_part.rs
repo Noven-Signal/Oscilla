@@ -1,9 +1,9 @@
 use ratatui::prelude::*;
 
-use crate::AppState::AppState::AppStateContainer ;
-use crate::widgets::ButtonArea::ButtonsArea;
-use crate::widgets::DurationBarArea::DurationBarArea;
-use crate::widgets::VolArea::VolArea;
+use crate::app_state::app_state::AppStateContainer ;
+use crate::widgets::button_area::ButtonsArea;
+use crate::widgets::duration_bar_area::DurationBarArea;
+use crate::widgets::vol_area::VolArea;
 
 pub struct BottomPart {}
 impl BottomPart {

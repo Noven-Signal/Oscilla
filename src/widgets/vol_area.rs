@@ -1,4 +1,4 @@
-use crate::extensions::Rect::RectExtension;
+use crate::extensions::rect::RectExtension;
 use crate::get_decorated_border;
 use crate::manipulation::PlayerControlSignal;
 use crossterm::event::KeyCode;
@@ -6,7 +6,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::LineGauge;
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
-use crate::AppState::AppState::{AppStateContainer, AreaHandler, PlayerThread, Tabs};
+use crate::app_state::app_state::{AppStateContainer, AreaHandler, PlayerThread, Tabs};
 
 #[derive(Default)]
 pub struct VolArea {}

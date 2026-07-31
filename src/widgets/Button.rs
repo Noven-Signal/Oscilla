@@ -6,7 +6,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{StatefulWidget, Widget};
 
-use crate::AppState::AppState::AppStateContainer;
+use crate::app_state::app_state::AppStateContainer;
 
 /// A custom widget that renders a button with a label, theme and state.
 #[derive(Debug, Clone)]

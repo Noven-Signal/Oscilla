@@ -1,9 +1,9 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Clear, Widget};
-use crate::AppState::AppState::AppStateContainer;
-use crate::widgets::BottomPart::BottomPart;
-use crate::widgets::Popup::Popup;
-use crate::widgets::{EffectArea::*, ListArea::*};
+use crate::app_state::app_state::AppStateContainer;
+use crate::widgets::bottom_part::BottomPart;
+use crate::widgets::popup::Popup;
+use crate::widgets::{effect_area::*, list_area::*};
 
 #[derive(Default, Clone, Copy)]
 pub struct AppRoot {}
