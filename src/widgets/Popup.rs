@@ -4,7 +4,6 @@ use ratatui::widgets::{Block, Paragraph, Widget, Wrap};
 
 use crate::AppState::AppState::AppStateContainer;
 use crate::app::PopupObject;
-use crate::extensions::Rect::{Margin, RectExtension};
 
 #[derive(Default, Clone, Copy)]
 pub struct Popup {}

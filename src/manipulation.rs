@@ -1,20 +1,14 @@
 use std::{
     convert::TryFrom,
     fmt::{self, Debug, Display},
-    ops::AddAssign,
     panic,
-    path::Path,
     sync::{
-        Arc, Barrier, Condvar, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicPtr, AtomicU8, Ordering},
     },
     time::Duration,
 };
 
-use symphonia::{
-    core::{io::MediaSourceStream, probe::Hint},
-    default::get_probe,
-};
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender, unbounded_channel},
     task::JoinError,
@@ -23,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
-    AudioDecoder::{BLOCK_SIZE_DEFAULT, DecodeLoopError, decode_loop},
+    AudioDecoder::decode_loop,
     AudioOutput,
     DecoderWrapper::DecoderWrapper,
     app::{PlayerToUISingnal, PlayerToUISingnalVeEnabled, SeekCompleteSignal, TrackInfo},
@@ -96,7 +90,6 @@ pub struct SeekSignalForDecoder {
 #[derive(Debug)]
 pub struct SeekSignalForRenderer {
     pub sync_obj: Arc<SeekTimingSyncState>,
-    pub target_duration: Duration,
     pub renderer_to_decoder_sync_signal_sender: UnboundedSender<RendererToDecoderSsynSignal>,
     pub decoder_to_renderer_sync_signal_recv: UnboundedReceiver<DecoderToRendererSyncSignal>,
     pub seek_no: u64,
@@ -136,7 +129,7 @@ impl TryFrom<usize> for SampleRate {
     }
 }
 impl SampleRate {
-    pub fn rawValue(&self) -> usize {
+    pub fn raw_value(&self) -> usize {
         *self as usize
     }
 }
@@ -237,10 +230,6 @@ pub struct VeControlSignalVeEnabled {
 
 struct DecoderInitSignal {
     renderer_sample_rate: SampleRate,
-}
-
-pub struct RendererInitSignal {
-    pub block_size: usize,
 }
 
 pub type SharedBuffer = [[Vec<f32>; CHANNEL]; NUM_OF_BLOCK];
@@ -364,7 +353,7 @@ pub async fn play_executor(
     });
 
     for _ in 0..NUM_OF_BLOCK - 2 - BACK_ROOM {
-        renderer_to_decoder_sender.send(RendererToDecoderSsynSignal());
+        _ = renderer_to_decoder_sender.send(RendererToDecoderSsynSignal());
     }
 
     let (ve_control_signal_sender, ve_control_signal_recv) = unbounded_channel();
@@ -392,7 +381,7 @@ pub async fn play_executor(
                     }) => {
                         let ve_shared_buffer = unsafe { retrieve_ref(&ve_shared_buffer) };
 
-                        player_to_ui_singnal_sender_for_ve.send(PlayerToUISingnal::VeEnabledSync);
+                        _ = player_to_ui_singnal_sender_for_ve.send(PlayerToUISingnal::VeEnabledSync);
 
                         ve_loop(
                             shared_buffer,
@@ -403,11 +392,10 @@ pub async fn play_executor(
                             ui_to_ve_signal_recv,
                             ve_control_signal_inner_recv,
                             &worker_to_player_notification_signal_sender_for_ve,
-                            //signal.cancellation_token,
                             sample_rate,
                             renderer_read_exclusize,
                         );
-                        worker_to_player_notification_signal_sender_for_ve
+                        _ = worker_to_player_notification_signal_sender_for_ve
                             .send(WorkerToPlayerNotification::VeDisabledSync);
                     }
                     None => break 'l1,
@@ -439,23 +427,22 @@ pub async fn play_executor(
                             ui_to_ve_signal_recv,
                             ve_shared_buffer: ve_enabled_info.ve_shared_buffer,
                             ve_control_signal_inner_recv,
-                            //cancellation_token,
                         });
                     }
                     Some(VeControlSignal::Stop) => {
                         if let Some(sender) = &ve_control_signal_inner_sender {
-                            sender.send(VeControlSignalInner::Stop);
+                            _ = sender.send(VeControlSignalInner::Stop);
                         }
                         break 'l1;
                     }
                     Some(VeControlSignal::VeDisabled) => {
                         if let Some(sender) = &ve_control_signal_inner_sender {
-                            sender.send(VeControlSignalInner::Stop);
+                            _ = sender.send(VeControlSignalInner::Stop);
                         }
                     }
                     Some(VeControlSignal::Seek(signal)) => {
                         if let Some(sender) = &ve_control_signal_inner_sender {
-                            sender.send(VeControlSignalInner::Seek(signal));
+                            _ = sender.send(VeControlSignalInner::Seek(signal));
                         }
                     }
                     None => break 'l1,
@@ -520,18 +507,18 @@ pub async fn play_executor(
 
             match message {
                 PlayerControlSignal::SetVol(vol) => {
-                    renderer_control_signal_sender.send(RendererControlSignal::SetVol(vol));
+                    _ = renderer_control_signal_sender.send(RendererControlSignal::SetVol(vol));
                 }
                 PlayerControlSignal::Pause => {
-                    renderer_control_signal_sender.send(RendererControlSignal::Pause);
+                    _ = renderer_control_signal_sender.send(RendererControlSignal::Pause);
                 }
                 PlayerControlSignal::Resume => {
-                    renderer_control_signal_sender.send(RendererControlSignal::Resume);
+                    _ = renderer_control_signal_sender.send(RendererControlSignal::Resume);
                 }
                 PlayerControlSignal::Stop => {
-                    renderer_control_signal_sender.send(RendererControlSignal::Stop);
-                    decoder_control_signal_sender.send(DecoderControlSignal::Stop);
-                    ve_control_signal_sender.send(VeControlSignal::Stop);
+                    _ = renderer_control_signal_sender.send(RendererControlSignal::Stop);
+                    _ = decoder_control_signal_sender.send(DecoderControlSignal::Stop);
+                    _ = ve_control_signal_sender.send(VeControlSignal::Stop);
                     break 'l1;
                 }
                 PlayerControlSignal::VeEnabled(ve_shared_buffer) => {
@@ -548,13 +535,13 @@ pub async fn play_executor(
                         ve_shared_buffer,
                     };
 
-                    decoder_control_signal_sender
+                    _ = decoder_control_signal_sender
                         .send(DecoderControlSignal::VeEnabled(ve_enabled_signal));
                 }
                 PlayerControlSignal::VeDisabled => {
                     ve_enabled_request_recvied_state = VeEnabledRquestRecivedState::VeDisabled;
-                    decoder_control_signal_sender.send(DecoderControlSignal::VeDisabled);
-                    ve_control_signal_sender.send(VeControlSignal::VeDisabled);
+                    _ = decoder_control_signal_sender.send(DecoderControlSignal::VeDisabled);
+                    _ = ve_control_signal_sender.send(VeControlSignal::VeDisabled);
                 }
                 PlayerControlSignal::Seek(signal) => {
                     struct SeekSignalForVeChannels {
@@ -589,7 +576,7 @@ pub async fn play_executor(
                                 unbounded_channel();
 
                             for _ in 0..NUM_OF_BLOCK - 2 {
-                                ve_to_decoder_sync_signal_sender.send(VeToDecoderSyncSignal());
+                                _ = ve_to_decoder_sync_signal_sender.send(VeToDecoderSyncSignal());
                             }
 
                             let seek_signal_for_decoder_ve_channels =
@@ -611,12 +598,11 @@ pub async fn play_executor(
                         };
 
                     for _ in 0..NUM_OF_BLOCK - 2 - BACK_ROOM {
-                        renderer_to_decoder_sync_signal_sender.send(RendererToDecoderSsynSignal());
+                        _ = renderer_to_decoder_sync_signal_sender.send(RendererToDecoderSsynSignal());
                     }
 
                     let seek_signal_for_renderer = SeekSignalForRenderer {
                         sync_obj: sync_obj.clone(),
-                        target_duration,
                         renderer_to_decoder_sync_signal_sender,
                         decoder_to_renderer_sync_signal_recv,
                         seek_no: signal.seek_no,
@@ -642,15 +628,15 @@ pub async fn play_executor(
                                 decoder_to_ve_sync_signal_recv,
                             };
 
-                            ve_control_signal_sender
+                            _ = ve_control_signal_sender
                                 .send(VeControlSignal::Seek(seek_signal_for_ve));
                         }
                         None => {}
                     };
 
-                    decoder_control_signal_sender
+                    _ = decoder_control_signal_sender
                         .send(DecoderControlSignal::Seek(seek_signal_for_decoder));
-                    renderer_control_signal_sender
+                    _ = renderer_control_signal_sender
                         .send(RendererControlSignal::Seek(seek_signal_for_renderer));
                 }
             };
@@ -668,9 +654,9 @@ pub async fn play_executor(
         let mut seek_decoder_completed_signal: Option<SeekCompleteFromDecoderSignal> = None;
 
         let handle_error_variant = || {
-            renderer_control_signal_sender.send(RendererControlSignal::Stop);
-            decoder_control_signal_sender.send(DecoderControlSignal::Stop);
-            ve_control_signal_sender.send(VeControlSignal::Stop);
+            _ = renderer_control_signal_sender.send(RendererControlSignal::Stop);
+            _ = decoder_control_signal_sender.send(DecoderControlSignal::Stop);
+            _ = ve_control_signal_sender.send(VeControlSignal::Stop);
 
             info!("WorkerToPlayerNotification::Error");
             player_control_signal_loop_task_cancellation_token.cancel();
@@ -683,7 +669,7 @@ pub async fn play_executor(
                     let (ui_to_ve_signal_sender, ui_to_ve_signal_recv) = unbounded_channel();
 
                     for _ in 0..NUM_OF_BLOCK_VE - 2 {
-                        ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
+                        _ = ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
                     }
 
                     let ve_buffer_duration_offset_sec =
@@ -693,8 +679,8 @@ pub async fn play_executor(
                         ve_to_ui_signal_sender,
                         ui_to_ve_signal_recv,
                     };
-                    ve_control_signal_sender.send(VeControlSignal::VeEnabled(send_signal));
-                    player_to_ui_singnal_sender.send(PlayerToUISingnal::VeEnabled(
+                    _ = ve_control_signal_sender.send(VeControlSignal::VeEnabled(send_signal));
+                    _ = player_to_ui_singnal_sender.send(PlayerToUISingnal::VeEnabled(
                         PlayerToUISingnalVeEnabled {
                             ui_to_ve_signal_sender,
                             ve_to_ui_signal_recv,
@@ -738,14 +724,14 @@ pub async fn play_executor(
                         },
                     );
 
-                    decoder_init_signal_sender.send(DecoderInitSignal {
+                    _ = decoder_init_signal_sender.send(DecoderInitSignal {
                         renderer_sample_rate: audio_device_sample_rate,
                     });
 
-                    player_to_ui_singnal_sender.send(PlayerToUISingnal::NoticeTrackInfo(
+                    _ = player_to_ui_singnal_sender.send(PlayerToUISingnal::NoticeTrackInfo(
                         TrackInfo {
-                            file_sample_rate: file_sample_rate.rawValue(),
-                            audio_device_sample_rate: audio_device_sample_rate.rawValue(),
+                            file_sample_rate: file_sample_rate.raw_value(),
+                            audio_device_sample_rate: audio_device_sample_rate.raw_value(),
                             track_duration,
                         },
                     ));
@@ -795,7 +781,7 @@ pub async fn play_executor(
                         .actual_seek_duration_sec,
                     seek_no: seek_decoder_completed_signal.seek_no,
                 };
-                player_to_ui_singnal_sender.send(PlayerToUISingnal::SeekComplete(signal));
+                _ = player_to_ui_singnal_sender.send(PlayerToUISingnal::SeekComplete(signal));
             }
         }
 

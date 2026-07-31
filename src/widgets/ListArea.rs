@@ -1,18 +1,10 @@
-use std::borrow::Cow;
-
-use crossterm::event::Event::Key;
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, HighlightSpacing, List, ListDirection, ListItem, ListState, Widget};
-use tracing_subscriber::fmt::format;
-
-use crate::AppState::AppState::{AppStateContainer, AreaHandler, PlayerThread};
-use crate::AudioFileInfo::AudioFileInfo;
-use crate::app::{App, AppContorlSignal};
-use crate::extensions::OnceLock::OnceLock_ext;
+use ratatui::widgets::{Block, HighlightSpacing, List, ListDirection, ListItem, Widget};
+use crate::AppState::AppState::{AppStateContainer, AreaHandler};
+use crate::app::App;
 use crate::extensions::Rect::RectExtension;
-use crate::manipulation::*;
 use crate::{AppState, get_decorated_border};
 
 #[derive(Default)]

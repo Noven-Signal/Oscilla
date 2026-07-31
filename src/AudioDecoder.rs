@@ -1,8 +1,6 @@
 use std::{
     fmt::{self, Display},
     ops::AddAssign,
-    sync::atomic::Ordering,
-    time::{self, Duration},
 };
 
 use symphonia::core::{audio::Signal, formats::SeekedTo};
@@ -11,20 +9,17 @@ use tracing::info;
 
 use crate::{
     DecoderWrapper::{DecodeResult, DecoderWrapper},
-    ResamplerWrapper::{self, RsamplerWrapper},
+    ResamplerWrapper::RsamplerWrapper,
     app::PlayerToUISingnal,
     manipulation::{
         CHANNEL, DecoderControlSignal, DecoderToRendererSyncSignal, DecorderToVeSyncSignal,
         EndOfStreamSignal, NUM_OF_BLOCK, RendererToDecoderSsynSignal, SampleRate,
         SeekCompleteFromDecoderSignal, SeekSignalForDecoder, SeekSignalForDecoderVeChannels,
-        SeekTimingSyncObj, SharedBuffer, VeEnabledInfoFromDecoder,
-        VeEnabledSignalFromPlayerToDecoder, VeToDecoderSyncSignal, WorkerToPlayerNotification,
+        SharedBuffer, VeEnabledInfoFromDecoder, VeEnabledSignalFromPlayerToDecoder,
+        VeToDecoderSyncSignal, WorkerToPlayerNotification,
     },
     utils::array_init,
 };
-
-
-
 
 pub const BLOCK_SIZE_DEFAULT: usize = 1024 * 16;
 
@@ -32,7 +27,7 @@ pub const BLOCK_SIZE_DEFAULT: usize = 1024 * 16;
 pub enum DecodeLoopError {
     SampleRateUnavailable,
     UnsupportedSampleRate(usize),
-    ResamplerInit(String),
+    ResamplerError(String),
     DecodeFailed(String),
 }
 
@@ -41,7 +36,7 @@ impl Display for DecodeLoopError {
         match self {
             Self::SampleRateUnavailable => write!(f, "sample rate is unavailable"),
             Self::UnsupportedSampleRate(rate) => write!(f, "unsupported sample rate: {rate}"),
-            Self::ResamplerInit(error) => write!(f, "resampler init failed: {error}"),
+            Self::ResamplerError(error) => write!(f, "resampler init failed: {error}"),
             Self::DecodeFailed(error) => write!(f, "decode failed: {error}"),
         }
     }
@@ -51,7 +46,7 @@ impl std::error::Error for DecodeLoopError {}
 
 impl From<color_eyre::eyre::Report> for DecodeLoopError {
     fn from(error: color_eyre::eyre::Report) -> Self {
-        Self::ResamplerInit(error.to_string())
+        Self::ResamplerError(error.to_string())
     }
 }
 
@@ -90,7 +85,7 @@ pub fn decode_loop(
             }) = ve_signal
             {
                 ve_to_decoder_signal_recv.blocking_recv();
-                decoder_to_ve_signal_sender.send(DecorderToVeSyncSignal());
+                _ = decoder_to_ve_signal_sender.send(DecorderToVeSyncSignal());
             }
             //info!("singnal_to_threal_decoer_b");
             let ret = decoder_to_renderer_sender.send(send_signal);
@@ -114,22 +109,22 @@ pub fn decode_loop(
             let Some(ResampleContainer {
                 decode_tmp_block,
                 resampler_wrapper,
-                block_size,
+                ..
             }) = resample_container
             else {
-                return;
+                return Result::Ok(());
             };
-
-            // for ch in 0..CHANNEL {
-            //     target_buffer[ch].resize(*block_size, 0f32);
-            // }
 
             let [target_buffer_ch_0, target_buffer_ch_1] = target_buffer;
 
-            resampler_wrapper.proc(
-                &[0, 1].map(|x| decode_tmp_block[x].as_slice()),
-                &mut [target_buffer_ch_0, target_buffer_ch_1],
-            );
+            resampler_wrapper
+                .proc(
+                    &[0, 1].map(|x| decode_tmp_block[x].as_slice()),
+                    &mut [target_buffer_ch_0, target_buffer_ch_1],
+                )
+                .map_err(|_| DecodeLoopError::ResamplerError("resampler error".to_string()))?;
+
+            return Result::<_, DecodeLoopError>::Ok(());
         };
 
     let get_block_size_before_resampler = |resample_container: &Option<ResampleContainer>| {
@@ -153,7 +148,9 @@ pub fn decode_loop(
     };
 
     let Ok(file_sample_rate) = SampleRate::try_from(file_sample_rate as usize) else {
-        return Err(DecodeLoopError::UnsupportedSampleRate(file_sample_rate as usize));
+        return Err(DecodeLoopError::UnsupportedSampleRate(
+            file_sample_rate as usize,
+        ));
     };
     let get_block_count =
         |current_played_sample: u64, resample_container: &Option<ResampleContainer>| {
@@ -188,11 +185,11 @@ pub fn decode_loop(
                 decode_tmp_block: array_init(|| vec![0f32; decode_tmp_block]),
                 resampler_wrapper: RsamplerWrapper::new(
                     file_sample_rate as usize,
-                    audio_device_sample_rate.rawValue(),
+                    audio_device_sample_rate.raw_value(),
                     base * multiple,
                 )?,
-                block_size: (decode_tmp_block * audio_device_sample_rate.rawValue())
-                    / file_sample_rate.rawValue(),
+                block_size: (decode_tmp_block * audio_device_sample_rate.raw_value())
+                    / file_sample_rate.raw_value(),
             })
         };
 
@@ -244,11 +241,11 @@ pub fn decode_loop(
 
                     let ve_start_read_exclusize = (write_exclusive + len + 1) % NUM_OF_BLOCK;
                     for _ in 0..len {
-                        ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal());
+                        _ = ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal());
                     }
 
                     for _ in 0..NUM_OF_BLOCK - len - 2 {
-                        decoder_to_ve_signal_sender.send(DecorderToVeSyncSignal());
+                        _ = decoder_to_ve_signal_sender.send(DecorderToVeSyncSignal());
                     }
 
                     let ve_buffer_duration_offset_sec = {
@@ -263,14 +260,14 @@ pub fn decode_loop(
                         let target_duration = ((after_seek_block_count as f64
                             * get_block_size_before_resampler(&resample_container) as f64)
                             + last_seeked_sample as f64)
-                            / file_sample_rate.rawValue() as f64;
+                            / file_sample_rate.raw_value() as f64;
 
                         target_duration
                     };
 
-                    decoder_to_player_notification_signal.send(
+                    _ = decoder_to_player_notification_signal.send(
                         WorkerToPlayerNotification::VeEnabledInfo(VeEnabledInfoFromDecoder {
-                            audio_device_sample_rate: audio_device_sample_rate.rawValue(),
+                            audio_device_sample_rate: audio_device_sample_rate.raw_value(),
                             ve_start_read_exclusize,
                             decorder_to_ve_signal_recv,
                             ve_to_decoder_signal_sender,
@@ -297,7 +294,7 @@ pub fn decode_loop(
                     decoder_to_renderer_sync_signal_sender,
                     renderer_to_decoder_sync_signal_recv,
                     seek_signal_for_decoder_ve_channels,
-                })) => 'b1: {
+                })) => {
                     info!("decoder_seek_signal");
 
                     let (sync_obj_increment, ve_enabled_flg_for_completed_notification) =
@@ -323,7 +320,7 @@ pub fn decode_loop(
                         let seeked = decoder_wrapper.seek(target_duration);
 
                         let convert_sample_count_to_sec_f64 =
-                            |ts| ts as f64 / file_sample_rate.rawValue() as f64;
+                            |ts| ts as f64 / file_sample_rate.raw_value() as f64;
 
                         write_exclusive = 0;
                         head = 0;
@@ -348,7 +345,7 @@ pub fn decode_loop(
                         seek_no,
                         ve_enabled: ve_enabled_flg_for_completed_notification,
                     };
-                    decoder_to_player_notification_signal
+                    _ = decoder_to_player_notification_signal
                         .send(WorkerToPlayerNotification::SeekCompleteFromDecoder(signal));
                     info!("decoder_seek_completed");
                 }
@@ -358,12 +355,8 @@ pub fn decode_loop(
 
         let decoded = decoder_wrapper.decode();
 
-        enum DecodeLoopResult {
-            Ok,
-            Error,
-        }
 
-        let mut proc_f32 = |view: &[&[f32]]| -> DecodeLoopResult {
+        let mut proc_f32 = |view: &[&[f32]]| -> Result<(),DecodeLoopError> {
             let fill_buff_within_block = |exclusive_buff: &mut [Vec<f32>; 2]| {
                 let copy_buff = |exclusive_buf: &mut [f32], view: &[f32]| {
                     let target_slice = &mut exclusive_buf[head..head + view.len()];
@@ -413,7 +406,7 @@ pub fn decode_loop(
                     mem_copy_with_sample_rate_conversion(
                         &mut shared_buffer[write_exclusive],
                         &mut resample_container,
-                    );
+                    )?;
 
                     _ = singnal_to_thread_sync(
                         &mut renderer_to_decoder_singal_recv,
@@ -441,7 +434,7 @@ pub fn decode_loop(
                     head = spill_over[0].len();
                 }
             }
-            DecodeLoopResult::Ok
+            Ok(())
         };
 
         use symphonia::core::audio::AudioBufferRef::*;
@@ -449,9 +442,7 @@ pub fn decode_loop(
             DecodeResult::Buf(audio_buffer_ref) => match audio_buffer_ref {
                 F32(cow) => {
                     let view = [0, 1].map(|ch| cow.chan(ch));
-                    if let DecodeLoopResult::Error = proc_f32(&view) {
-                        break 'l1;
-                    }
+                    proc_f32(&view)?;
                     current_played_sample.add_assign(cow.chan(0).len() as u64);
                 }
                 S16(cow) => {
@@ -464,7 +455,7 @@ pub fn decode_loop(
                     let type_conversion_buff_view =
                         |i: usize| &type_conversion_buff[i][0..cow.chan(i).len()];
                     let target = [0, 1].map(|i| type_conversion_buff_view(i));
-                    proc_f32(&target);
+                    proc_f32(&target)?;
                     current_played_sample.add_assign(cow.chan(0).len() as u64);
                 }
                 _ => {}
@@ -473,14 +464,10 @@ pub fn decode_loop(
                 return Err(DecodeLoopError::DecodeFailed(error.to_string()));
             }
             DecodeResult::EndOfStream => {
-                // for channel_data_ref in &mut shared_buffer[write_exclusive] {
-                //     channel_data_ref[head..].fill(0f32);
-                // }
-
                 mem_copy_with_sample_rate_conversion(
                     &mut shared_buffer[write_exclusive],
                     &mut resample_container,
-                );
+                )?;
 
                 _ = singnal_to_thread(
                     &mut renderer_to_decoder_singal_recv,
@@ -494,7 +481,7 @@ pub fn decode_loop(
 
                 write_exclusive = next_block(write_exclusive);
 
-                player_to_ui_singnal_sender.send(PlayerToUISingnal::EndOfStream);
+                _ = player_to_ui_singnal_sender.send(PlayerToUISingnal::EndOfStream);
 
                 end_of_stream_reached = true;
             }

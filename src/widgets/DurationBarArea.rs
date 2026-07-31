@@ -1,11 +1,19 @@
 use std::time::Duration;
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout}, prelude::{Buffer, Rect}, style::{Color, Style}, symbols, text::Text, widgets::{LineGauge, StatefulWidget, Widget},
+    layout::{Constraint, Direction, Layout},
+    prelude::{Buffer, Rect},
+    style::Style,
+    symbols,
+    text::Text,
+    widgets::{LineGauge, StatefulWidget, Widget},
 };
 
 use crate::{
-    AppState::AppState::{AppStateContainer, AreaHandler, TabState, Tabs}, app::App, extensions::Rect::RectExtension, get_decorated_border,
+    AppState::AppState::{AppStateContainer, AreaHandler, TabState, Tabs},
+    app::App,
+    extensions::Rect::RectExtension,
+    get_decorated_border,
 };
 
 #[derive(Default)]
@@ -57,10 +65,10 @@ impl StatefulWidget for DurationBarArea {
                 Style::new().white().$ident().bold()
             };
         }
-        
+
         let filled_style = match state.focus_state {
             TabState::Selected(Tabs::DurationBarArea) => filled_color!(on_magenta),
-            _ =>filled_color!(on_red),
+            _ => filled_color!(on_red),
         };
 
         let duration_bar = LineGauge::default()
@@ -86,12 +94,13 @@ impl AreaHandler for DurationBarArea {
         let Some(ref playing_track_info) = app_state_container.playing_track_info else {
             return;
         };
-        let calc_seek_point = |key:u32| playing_track_info.track_duraion.as_secs_f32() * (key as f32 / 10f32);
+        let calc_seek_point =
+            |key: u32| playing_track_info.track_duraion.as_secs_f32() * (key as f32 / 10f32);
         use crossterm::event::KeyCode::*;
         match key_code {
             Left => App::seek_prev(app_state_container, Duration::from_secs(5)),
             Right => App::seek_forward(app_state_container, Duration::from_secs(5)),
-            Char(x) if matches!(x,'0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9') => {
+            Char(x) if matches!(x, '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9') => {
                 let seek_point = calc_seek_point(x.to_digit(10).unwrap());
                 App::seek(app_state_container, Duration::from_secs_f32(seek_point));
             }

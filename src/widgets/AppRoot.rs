@@ -1,16 +1,9 @@
-use color_eyre::owo_colors::OwoColorize;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Clear, List, ListDirection, ListState, Widget};
-
-use crate::AppState::AppState::{AppStateContainer, TabState, Tabs};
-use crate::extensions::OnceLock::OnceLock_ext;
-use crate::extensions::Rect::RectExtension;
-use crate::extensions::SelectBlock::SelectedBlock;
+use ratatui::widgets::{Clear, Widget};
+use crate::AppState::AppState::AppStateContainer;
 use crate::widgets::BottomPart::BottomPart;
-
 use crate::widgets::Popup::Popup;
 use crate::widgets::{EffectArea::*, ListArea::*};
-use crate::{AppState, get_decorated_border};
 
 #[derive(Default, Clone, Copy)]
 pub struct AppRoot {}

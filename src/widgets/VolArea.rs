@@ -1,16 +1,12 @@
-use std::sync::atomic::Ordering;
-
 use crate::extensions::Rect::RectExtension;
-use crate::extensions::SelectBlock::SelectedBlock;
 use crate::get_decorated_border;
 use crate::manipulation::PlayerControlSignal;
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, LineGauge};
+use ratatui::widgets::LineGauge;
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
-use crate::AppState::AppState::{AppStateContainer, AreaHandler, PlayerThread, TabState, Tabs};
-use crate::extensions::OnceLock::OnceLock_ext;
+use crate::AppState::AppState::{AppStateContainer, AreaHandler, PlayerThread, Tabs};
 
 #[derive(Default)]
 pub struct VolArea {}
@@ -58,7 +54,7 @@ impl AreaHandler for VolArea {
             ..
         }) = &mut app_state_continer.player_thread
         {
-            player_control_singnal_sender.send(PlayerControlSignal::SetVol(after as u16));
+            _ = player_control_singnal_sender.send(PlayerControlSignal::SetVol(after as u16));
         }
     }
 }

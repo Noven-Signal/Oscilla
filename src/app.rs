@@ -1,13 +1,4 @@
-use std::{
-    collections::VecDeque,
-    fmt::Debug,
-    ops::{Add, AddAssign},
-    pin::Pin,
-    sync::atomic::{AtomicPtr, Ordering},
-    time::{Duration, Instant, SystemTime},
-    usize,
-};
-
+use std::{fmt::Debug, ops::Add, sync::atomic::AtomicPtr, time::Duration, usize};
 use crate::{
     AppState::{
         self,
@@ -16,33 +7,25 @@ use crate::{
             VeSwitcherRequestSignal,
         },
     },
-    app,
     manipulation::{
-        self, AudioDeviceInfo, DecoderControlSignal::VeDisabled, NUM_OF_BLOCK_VE, OscilloscopeData,
-        PlayerControlSignal, PlayerExecutorError, SeekCompleteFromVeSignal, UiToPlayerSeekSignal,
-        UiVEThreadSyncSignal, VESharedBuffer,
+        self, NUM_OF_BLOCK_VE, OscilloscopeData, PlayerControlSignal, SeekCompleteFromVeSignal,
+        UiToPlayerSeekSignal, UiVEThreadSyncSignal,
     },
     tui::Tui,
     utils::array_init,
     widgets::{AppRoot::AppRoot, Popup::Popup},
 };
-use color_eyre::{eyre::Ok, owo_colors::OwoColorize};
+use color_eyre::eyre::Ok;
 use crossterm::event::Event as CrosstermEvent;
 use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use futures::{FutureExt, StreamExt, channel::mpsc::unbounded, future};
+use futures::{FutureExt, StreamExt, future};
 use ratatui::{prelude::Rect, widgets::StatefulWidget};
 use serde::{Deserialize, Serialize};
-use symphonia::core::units::TimeStamp;
 use tokio::{
-    io::join,
-    join, pin,
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
-    task::{JoinError, JoinHandle},
     time::Interval,
 };
-use tokio_util::sync::CancellationToken;
 use tracing::info;
-use windows::Win32::System::Com::IInternalUnknown;
 
 pub struct Ves {
     pub ui_to_ve_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
@@ -214,7 +197,7 @@ impl App {
             player_control_singnal_sender,
         }) = &mut self.app_state_container.player_thread
         {
-            player_control_singnal_sender.send(PlayerControlSignal::Stop);
+            _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
             let player_result = handle.await?;
             if let Err(err) = player_result {
                 self.app_state_container.popup_object = Some(PopupObject::new(err.error_message));
@@ -238,7 +221,6 @@ impl App {
             }
 
             enum VeProcResult {
-                VeDisabled,
                 SyncRange,
                 VeIsTooForward,
             }
@@ -271,7 +253,7 @@ impl App {
                             //dbg!(i);
                             ve_to_ui_signal_recv.recv().await;
                             Self::ve_sync(ve_read_exclusive).await;
-                            ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
+                            _ = ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
                             *ve_frame_count = *ve_frame_count + 1;
                         }
                         ve_to_ui_signal_recv.recv().await;
@@ -347,7 +329,7 @@ impl App {
                         let AppStateContainer{ve_channel: Some(ref mut ves),..} = self.app_state_container else {break 'b1;};
                         Self::ve_sync(&mut ves.ve_read_exclusive).await;
 
-                        ves.ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
+                        _ = ves.ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
                         ves.ve_frame_count = ves.ve_frame_count + 1;
                     }
                 },
@@ -436,8 +418,8 @@ impl App {
             return Ok(());
         };
         match target_tab {
-            VeSelectedTab::Off => 'b1: {
-                sender.send(PlayerControlSignal::VeDisabled);
+            VeSelectedTab::Off => {
+                _ = sender.send(PlayerControlSignal::VeDisabled);
             }
             _ => {
                 let Some(playing_track_info) = &app_state_container.playing_track_info else {
@@ -460,7 +442,7 @@ impl App {
 
                 let ptr = AtomicPtr::new(ve_shared_buffer);
 
-                sender.send(PlayerControlSignal::VeEnabled(ptr));
+                _ = sender.send(PlayerControlSignal::VeEnabled(ptr));
             }
         }
         Ok(())
@@ -481,7 +463,7 @@ impl App {
 
                 let target_tab = self.app_state_container.ve_selected;
                 if target_tab != VeSelectedTab::Off {
-                    self.app_state_container
+                    _ = self.app_state_container
                         .ve_switcher_request_signal_sender
                         .send(VeSwitcherRequestSignal {
                             request_tab: target_tab,
@@ -578,7 +560,7 @@ impl App {
                 else {
                     break 'b1;
                 };
-                player_control_singnal_sender.send(PlayerControlSignal::Stop);
+                _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
             }
             PlayerToUISingnal::SeekComplete(SeekCompleteSignal {
                 seek_ve_completed_signal,
@@ -603,9 +585,6 @@ impl App {
                     ve_to_ui_signal_recv,
                 }) = seek_ve_completed_signal
                 {
-                    // let PlayState::Seeking(idx) = self.app_state_container.play_state else {
-                    //     break 'b1;
-                    // };
                     self.app_state_container.ve_channel = Some(Ves {
                         ui_to_ve_signal_sender,
                         ve_to_ui_signal_recv,
@@ -614,7 +593,6 @@ impl App {
                         ve_frame_count: 0,
                         ve_read_exclusive: None,
                     });
-                    //self.app_state_container.play_state = PlayState::Playing(idx);
                 }
 
                 if let Some(PlayerRequestState::Seek(seek_no_reqeust_state)) =
@@ -624,7 +602,7 @@ impl App {
                     self.app_state_container.player_request_state = None;
                 }
 
-                self.render();
+                self.render()?;
             }
         }
 
@@ -634,7 +612,7 @@ impl App {
     async fn handle_key_event(&mut self, key: KeyEvent) -> color_eyre::Result<()> {
         use AppState::AppState::*;
 
-        let mut move_key_pressed_handler =
+        let move_key_pressed_handler =
             |key_code: KeyCode, app_state_container: &mut AppStateContainer| {
                 match app_state_container.focus_state {
                     TabState::Focused(_) | TabState::None => {
@@ -656,7 +634,7 @@ impl App {
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            } => 'b1: {
+            } => {
                 self.event_loop_canceled = true;
                 if let Some(PlayerThread {
                     player_control_singnal_sender,
@@ -807,7 +785,7 @@ impl App {
         app_state_container.player_request_state = Some(PlayerRequestState::Seek(new_seek_no));
         playing_track_info.seeking_duration = Some(reqest_pos);
 
-        player_control_singnal_sender.send(PlayerControlSignal::Seek(UiToPlayerSeekSignal {
+        _ = player_control_singnal_sender.send(PlayerControlSignal::Seek(UiToPlayerSeekSignal {
             target_duration: reqest_pos,
             seek_no: new_seek_no,
         }));

@@ -1,33 +1,15 @@
-#![allow(dead_code)] // Remove this once you start using the code
-
 use std::{
-    io::{self, Stdout, stdout},
+    io::{Stdout, stdout},
     ops::{Deref, DerefMut},
-    time::Duration,
 };
 
 use crossterm::{
     cursor,
-    event::{
-        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event as CrosstermEvent, EventStream, KeyEvent, KeyEventKind, MouseEvent,
-    },
+    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
-use futures::{FutureExt, StreamExt};
+
 use ratatui::backend::CrosstermBackend as Backend;
-use serde::{Deserialize, Serialize};
-use tokio::{
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender, unbounded_channel},
-    task::JoinHandle,
-    time::interval,
-};
-use tokio_util::sync::CancellationToken;
-use tracing::error;
-use urlencoding;
-
-use crossterm::execute;
-
 
 pub struct Tui {
     pub terminal: ratatui::Terminal<Backend<Stdout>>,
@@ -37,7 +19,7 @@ pub struct Tui {
 
 impl Tui {
     pub fn new() -> color_eyre::Result<Self> {
-       // let (event_tx, event_rx) = unbounded_channel::<Event>();
+        // let (event_tx, event_rx) = unbounded_channel::<Event>();
         Ok(Self {
             terminal: ratatui::Terminal::new(Backend::new(stdout()))?,
             mouse: false,
@@ -64,7 +46,7 @@ impl Tui {
         if self.paste {
             crossterm::execute!(stdout(), EnableBracketedPaste)?;
         }
-       // self.start();
+        // self.start();
         Ok(())
     }
 
@@ -82,8 +64,6 @@ impl Tui {
         }
         Ok(())
     }
-
-
 }
 
 impl Deref for Tui {

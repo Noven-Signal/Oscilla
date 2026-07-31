@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 
@@ -9,8 +7,6 @@ use ratatui::text::Line;
 use ratatui::widgets::{StatefulWidget, Widget};
 
 use crate::AppState::AppState::AppStateContainer;
-use crate::app;
-use crate::extensions::OnceLock::OnceLock_ext;
 
 /// A custom widget that renders a button with a label, theme and state.
 #[derive(Debug, Clone)]
@@ -38,16 +34,7 @@ pub enum PlayButtonState {
     Paused,
     Stopped
 }
-impl PlayButtonState {
-    pub fn new(app_state_container: &AppStateContainer) -> Self {
-        use crate::AppState::AppState::PlayState::*;
-        match app_state_container.play_state {
-            Playing(_) => Self::Playing,
-            Paused(_) => Self::Paused,
-            Stopped => todo!(),
-        }
-    }
-}
+
 impl ButtonIdent {
     const fn get_disp_name(&self) -> &'static str {
         match self {
@@ -88,11 +75,8 @@ impl ButtonIdent {
     }
 }
 
-/// A button with a label that can be themed.
 impl<'a> Button<'a> {
     pub fn new(ident: ButtonIdent, state: ButtonState) -> Self {
-        //    let button_handler_func_dic = state
-        //     button_focus_state_mutex_guard.insert(ident.clone(), Box::new(on_pushed));
         Button {
             label: ident.get_disp_name().into(),
             state: state,
@@ -102,7 +86,7 @@ impl<'a> Button<'a> {
 
 impl StatefulWidget for Button<'_> {
     type State = AppStateContainer;
-    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+    fn render(self, area: Rect, buf: &mut Buffer, _state: &mut Self::State) {
         let (background_color, text_color) = match &self.state {
             ButtonState::Normal => (Color::Rgb(0, 100, 0), Color::White),
             ButtonState::Focused => (Color::Magenta, Color::White),

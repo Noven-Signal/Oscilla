@@ -1,19 +1,11 @@
-use std::{cmp, time::Duration};
-
 use tokio::sync::mpsc::{
     UnboundedReceiver, UnboundedSender, error::TryRecvError, unbounded_channel,
 };
-use tokio_util::sync::CancellationToken;
-use tracing::info;
 
-use crate::{
-    app::PlayerToUISingnal,
-    manipulation::{
-        CHANNEL, DecorderToVeSyncSignal, NUM_OF_BLOCK, NUM_OF_BLOCK_VE, OscilloscopeData,
-        SeekCompleteFromVeSignal, SeekSignalForVe, SharedBuffer, UiVEThreadSyncSignal,
-        VESharedBuffer, VeControlSignal, VeToDecoderSyncSignal, WorkerToPlayerNotification,
-    },
-    utils::array_init,
+use crate::manipulation::{
+    CHANNEL, DecorderToVeSyncSignal, NUM_OF_BLOCK, NUM_OF_BLOCK_VE, SeekCompleteFromVeSignal,
+    SeekSignalForVe, SharedBuffer, UiVEThreadSyncSignal, VESharedBuffer, VeToDecoderSyncSignal,
+    WorkerToPlayerNotification,
 };
 
 pub enum VeControlSignalInner {
@@ -34,7 +26,6 @@ pub fn ve_loop(
     worker_to_player_notification_signal_sender_for_ve: &UnboundedSender<
         WorkerToPlayerNotification,
     >,
-    // ve_cancellation_token: CancellationToken,
     sample_rate: usize,
     mut read_exclusive: usize,
 ) {
@@ -46,35 +37,23 @@ pub fn ve_loop(
 
     let mut read_head: usize = 0;
     let mut ve_buff_write_head: usize = 0;
-    //let mut read_exclusive = read_exclusive;
-
     let mut write_exclusive: usize = 0;
-    let mut count = 0;
 
     let move_window = sample_rate / FRAME_RATE;
 
-    let mut signal_to_decoder_thread =
+    let signal_to_decoder_thread =
         |decoder_to_ve_recv: &mut UnboundedReceiver<DecorderToVeSyncSignal>,
          ve_to_decoder_signal_sender: &UnboundedSender<VeToDecoderSyncSignal>| {
             decoder_to_ve_recv.blocking_recv();
             ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal())
         };
 
-    let mut signal_to_ui_thread =
+    let signal_to_ui_thread =
         |ui_to_ve_recv: &mut UnboundedReceiver<UiVEThreadSyncSignal>,
          ve_to_ui_signal_sender: &UnboundedSender<UiVEThreadSyncSignal>| {
             ui_to_ve_recv.blocking_recv();
             ve_to_ui_signal_sender.send(UiVEThreadSyncSignal())
         };
-
-    // loop {
-    //     signal_to_decoder_thread();
-
-    //     signal_to_ui_thread();
-    // }
-
-    // return;
-
 
     'l1: loop {
         let get_block_size = |read_exclusive: usize| shared_buffer[read_exclusive][0].len();
@@ -85,7 +64,6 @@ pub fn ve_loop(
                 ve_to_decoder_sync_signal_sender: ve_to_decoder_sync_signal_sender_got,
                 decoder_to_ve_sync_signal_recv: decoder_to_ve_sync_signal_recv_got,
             })) => {
-                //     sync_obj.init_sync.wait(1);
                 read_exclusive = 0;
                 read_head = 0;
                 ve_buff_write_head = 0;
@@ -99,27 +77,24 @@ pub fn ve_loop(
                 let (ui_to_ve_signal_sender, ui_to_ve_signal_recv_temp) = unbounded_channel();
 
                 for _ in 0..NUM_OF_BLOCK_VE - 2 {
-                    ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
+                    _ = ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
                 }
 
                 ve_to_ui_signal_sender = ve_to_ui_signal_sender_temp;
                 ui_to_ve_recv = ui_to_ve_signal_recv_temp;
 
-                worker_to_player_notification_signal_sender_for_ve.send(
+                _ = worker_to_player_notification_signal_sender_for_ve.send(
                     WorkerToPlayerNotification::SeekCompleteFromVe(SeekCompleteFromVeSignal {
                         ui_to_ve_signal_sender,
                         ve_to_ui_signal_recv,
                     }),
                 );
 
-                signal_to_decoder_thread(&mut decoder_to_ve_recv, &ve_to_decoder_signal_sender);
+                _ = signal_to_decoder_thread(&mut decoder_to_ve_recv, &ve_to_decoder_signal_sender);
             }
             Ok(VeControlSignalInner::Stop) | Err(TryRecvError::Disconnected) => break 'l1,
             Err(TryRecvError::Empty) => {}
         }
-        // if ve_cancellation_token.is_cancelled() {
-        //     break 'l1;
-        // }
 
         fn mem_copy_with_conversion(src: &[f32], target: &mut [(f64, f64)]) {
             for (i, ele) in src.iter().enumerate() {

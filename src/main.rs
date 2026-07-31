@@ -1,11 +1,10 @@
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
-    AppState::AppState::{AppStateContainer, PlayState},
+    AppState::AppState::AppStateContainer,
     app::{App, AppContorlSignal, PopupObject},
-    manipulation::PlayerControlSignal,
     widgets::AppRoot::*,
 };
 
@@ -18,10 +17,8 @@ mod MyDefMacro;
 mod ResamplerWrapper;
 mod action;
 mod app;
-mod cli;
 mod config;
 mod errors;
-mod event_handler;
 mod extensions;
 mod logging;
 mod manipulation;
@@ -62,13 +59,17 @@ async fn main() -> color_eyre::Result<()> {
         unbounded_channel::<AppContorlSignal>();
     let (popup_queue_signal_sender, popup_queue_signal_recv) = unbounded_channel::<PopupObject>();
 
-    let app_state_container = AppStateContainer::new(app_control_signal_sender,popup_queue_signal_sender, filtered_args);
+    let app_state_container = AppStateContainer::new(
+        app_control_signal_sender,
+        popup_queue_signal_sender,
+        filtered_args,
+    );
 
     let mut app = App::new(
         AppRoot::default(),
         app_state_container,
         app_control_signal_recv,
-        popup_queue_signal_recv
+        popup_queue_signal_recv,
     )?;
     app.run().await?;
 

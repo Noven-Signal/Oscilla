@@ -3,25 +3,19 @@ use std::fmt::{self, Display};
 use std::path::Path;
 use std::time::Duration;
 
-use symphonia::core::audio::{AsAudioBufferRef, AudioBufferRef, Signal};
+use symphonia::core::audio::AudioBufferRef;
 use symphonia::core::codecs::{CodecParameters, Decoder, DecoderOptions};
 
-use symphonia::core::formats::{FormatReader, Packet, SeekMode, SeekTo, SeekedTo};
+use symphonia::core::formats::{SeekMode, SeekTo, SeekedTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::{Metadata, Tag};
 use symphonia::core::probe::{Hint, ProbeResult};
 use symphonia::core::units::Time;
 use symphonia::default::get_probe;
-use tracing::{Instrument, info};
 
-/// Options for the decode command.
-#[derive(Copy, Clone)]
-pub struct DecoderOptionsAndTrackNum {
-    pub dec_opts: DecoderOptions,
-    pub track_num: Option<usize>,
-}
 
-#[derive(Debug)] // Required for Debug trait
+
+#[derive(Debug)]
 pub enum DecodeInitError {
     FileOpenFailed,
     NoTrackFound,
@@ -33,7 +27,7 @@ impl Display for DecodeInitError {
         match self {
             Self::NoTrackFound => write!(f, "No Default Track is found "),
             Self::FileOpenFailed => write!(f, "FileOpenFailed"),
-            Self::SeekError(error) => write!(f, "seek error: {error}")
+            Self::SeekError(error) => write!(f, "seek error: {error}"),
         }
     }
 }
@@ -103,7 +97,7 @@ impl DecoderWrapper {
     pub fn decode(&'_ mut self) -> DecodeResult<'_> {
         let packet = match self.probe_result.format.next_packet() {
             Ok(p) => p,
-            Err(symphonia::core::errors::Error::IoError(err)) => {
+            Err(symphonia::core::errors::Error::IoError(_)) => {
                 //temp EndOfStream
                 return DecodeResult::EndOfStream;
             }
@@ -117,7 +111,6 @@ impl DecoderWrapper {
             Ok(buf) => DecodeResult::Buf(buf),
             Err(err) => DecodeResult::Err(err),
         }
-        //   do_verification(decoder.finalize())
     }
 
     pub fn get_codec_params(&self) -> Option<&CodecParameters> {

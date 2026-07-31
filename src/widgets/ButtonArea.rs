@@ -1,18 +1,15 @@
 use crate::app::App;
 use crate::extensions::Rect::RectExtension;
+use crate::get_decorated_border;
 use crate::manipulation::PlayerControlSignal;
-use crate::widgets::Button::{ButtonState, PlayButtonState};
-use crate::{app, get_decorated_border, manipulation};
+use crate::widgets::Button::ButtonState;
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, LineGauge};
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
-use tokio::sync::mpsc::unbounded_channel;
 
 use crate::AppState::AppState::{
     AppStateContainer, AreaHandler, PlayState, PlayerThread, TabState, Tabs,
 };
-use crate::extensions::OnceLock::OnceLock_ext;
 
 use crate::widgets::Button::{Button, ButtonIdent};
 
@@ -82,7 +79,7 @@ impl AreaHandler for ButtonsArea {
         }
 
         match focused_button_ident {
-            ButtonIdent::PlayOrPause(player_button_state) => 'play_arm: {
+            ButtonIdent::PlayOrPause(_) => 'play_arm: {
                 let Some(PlayerThread {
                     player_control_singnal_sender: sender,
                     ..

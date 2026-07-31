@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use symphonia::core::{meta::Tag, *};
-use tracing::info;
 
 use crate::DecoderWrapper::{DecodeInitError, DecoderWrapper};
 

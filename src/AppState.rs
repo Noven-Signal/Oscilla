@@ -1,20 +1,15 @@
 pub mod AppState {
     use std::fmt::Debug;
-    use std::ops::Index;
     use std::slice::Iter;
     use std::sync::Arc;
-    use std::time::{Duration, SystemTime};
-
+    use std::time::Duration;
     use crossterm::event::KeyCode;
     use ratatui::widgets::ListState;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
     use tokio::task::JoinHandle;
-
-    use crate::AppState::AppState::VeSelectedTab::Oscilloscope;
     use crate::AudioFileInfo::AudioFileInfo;
     use crate::app::{AppContorlSignal, PlayerRequestState, PopupObject, Ves};
-    use crate::manipulation::{PlayerControlSignal, PlayerExecutorError, UiVEThreadSyncSignal, VESharedBuffer};
-    use crate::utils::array_init;
+    use crate::manipulation::{PlayerControlSignal, PlayerExecutorError, VESharedBuffer};
     use crate::widgets::Button::{ButtonIdent, PlayButtonState};
     use crate::widgets::ButtonArea::ButtonsArea;
     use crate::widgets::DurationBarArea::DurationBarArea;
@@ -31,8 +26,8 @@ pub mod AppState {
 
     pub trait AreaHandler {
         fn handle_key(app_state_container: &mut AppStateContainer, key_code: KeyCode);
-        fn get_tab_selected_handler(app_state_container: &mut AppStateContainer) {}
-        fn lost_tab_selection_handler(app_state_container: &mut AppStateContainer) {}
+        fn get_tab_selected_handler(_app_state_container: &mut AppStateContainer) {}
+        fn lost_tab_selection_handler(_app_state_container: &mut AppStateContainer) {}
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -151,6 +146,7 @@ pub mod AppState {
     }
 
     pub struct PlayingTrackInfo {
+        #[allow(dead_code)]
         pub file_sample_rate: usize,
         pub audio_device_sample_rate: usize,
         pub track_duraion: Duration,
@@ -232,14 +228,6 @@ pub mod AppState {
             use VeSelectedTab::*;
             [Off, Oscilloscope]
         }
-        pub fn list_str() -> [String; 2] {
-            use VeSelectedTab::*;
-
-            [
-                stringify!(Off).to_string(),
-                stringify!(Oscilloscope).to_string(),
-            ]
-        }
         pub fn nameof(&self) -> String {
             use VeSelectedTab::*;
             match self {
@@ -257,7 +245,6 @@ pub mod AppState {
         }
 
         pub fn get_focus_tab(&self, key_code: KeyCode) -> VeSelectedTab {
-            use VeSelectedTab::*;
             let arr = Self::enumate_case();
             let current_index = self.enumerate_arr_idnex();
 
@@ -345,7 +332,7 @@ pub mod AppState {
                     message: format!("an error occurred during loading file: \n{error_paths}"),
                     button_name: "OK".into(),
                 };
-                popup_queue_signal_sender.send(signal);
+                _ = popup_queue_signal_sender.send(signal);
             }
 
             Self {

@@ -1,32 +1,23 @@
-use std::{
-    sync::{Arc, atomic::AtomicPtr},
-    time::Duration,
-};
-
-use rand::RngReader;
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     prelude::{Buffer, Rect},
-    style::{Color, Style, Styled, Stylize},
-    symbols::{self, Marker},
+    style::{Color, Style},
+    symbols::Marker,
     text::{Line, Span},
     widgets::{Axis, Chart, Dataset, GraphType, StatefulWidget, Tabs, Widget},
 };
-
 use crate::{
     AppState::AppState::{
-        AppStateContainer, AreaHandler, PlayingTrackInfo, TabState, VeSelectedTab, VeSwitcherRequestSignal,
+        AppStateContainer, AreaHandler, PlayingTrackInfo, VeSelectedTab, VeSwitcherRequestSignal,
     },
-    app::{self, TrackInfo, VeSwitcherSyncSignal, Ves},
+    app::Ves,
     extensions::Rect::RectExtension,
     get_decorated_border,
-    manipulation::{OscilloscopeData, PlayerControlSignal},
-    utils::array_init,
 };
 
 #[derive(Default)]
 pub struct EffectArea {}
-static mut count: i32 = 0;
+
 impl StatefulWidget for EffectArea {
     type State = AppStateContainer;
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
@@ -64,7 +55,11 @@ impl StatefulWidget for EffectArea {
         );
 
         let AppStateContainer {
-            playing_track_info: Some(PlayingTrackInfo { audio_device_sample_rate: sample_rate, .. }),
+            playing_track_info:
+                Some(PlayingTrackInfo {
+                    audio_device_sample_rate: sample_rate,
+                    ..
+                }),
             ..
         } = state
         else {
@@ -72,7 +67,8 @@ impl StatefulWidget for EffectArea {
         };
 
         let Some(Ves {
-            ve_read_exclusive: Some(ve_read_exclusive), ..
+            ve_read_exclusive: Some(ve_read_exclusive),
+            ..
         }) = state.ve_channel
         else {
             return;
@@ -132,9 +128,13 @@ impl AreaHandler for EffectArea {
         }
         *ve_selected = target_tab;
 
-        let Some(_)  = app_state_container.playing_track_info else {
+        let Some(_) = app_state_container.playing_track_info else {
             return;
         };
-        app_state_container.ve_switcher_request_signal_sender.send(VeSwitcherRequestSignal{ request_tab: target_tab});
+        _ = app_state_container
+            .ve_switcher_request_signal_sender
+            .send(VeSwitcherRequestSignal {
+                request_tab: target_tab,
+            });
     }
 }
