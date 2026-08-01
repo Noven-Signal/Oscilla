@@ -25,7 +25,6 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     time::Interval,
 };
-use tracing::info;
 
 pub struct Ves {
     pub ui_to_ve_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
@@ -576,7 +575,7 @@ impl App {
                     Duration::from_secs_f64(actual_seek_duration_sec),
                     Duration::ZERO,
                 );
-                info!("UI seek complete");
+                //info!("UI seek complete");
 
                 playing_track_info.seek_completed_recieved_seek_no = seek_no;
                 playing_track_info.seeking_duration = None;

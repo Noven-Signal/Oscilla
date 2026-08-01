@@ -10,7 +10,6 @@ use tokio::{
     task::JoinError,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::info;
 
 use crate::{
     app::{PlayerToUISingnal, PlayerToUISingnalVeEnabled, SeekCompleteSignal, TrackInfo},
@@ -57,7 +56,7 @@ impl SeekTimingSyncObj {
         drop(mutex_guard);
         let _mutex_guard = condvar
             .wait_while(mutex.lock().unwrap(), |state| {
-                info!("{}", state.load(Ordering::SeqCst));
+                //info!("{}", state.load(Ordering::SeqCst));
                 state.load(Ordering::SeqCst) < 3
             })
             .unwrap();
@@ -338,7 +337,7 @@ pub async fn play_executor(
         ) {
             _ = worker_to_player_notofication_signal_sender_clone
                 .send(WorkerToPlayerNotification::Error);
-            info!("decode_loop error: {err}");
+            //info!("decode_loop error: {err}");
             return Err(PlayerExecutorError {
                 error_message: err.to_string(),
             });
@@ -638,7 +637,7 @@ pub async fn play_executor(
                 }
             };
         }
-        info!("exit_player_control_signal_loop_task");
+        //info!("exit_player_control_signal_loop_task");
     };
 
     let renderer_control_signal_sender = &renderer_control_signal_sender;
@@ -655,7 +654,7 @@ pub async fn play_executor(
             _ = decoder_control_signal_sender.send(DecoderControlSignal::Stop);
             _ = ve_control_signal_sender.send(VeControlSignal::Stop);
 
-            info!("WorkerToPlayerNotification::Error");
+            //info!("WorkerToPlayerNotification::Error");
             player_control_signal_loop_task_cancellation_token.cancel();
         };
 
@@ -782,7 +781,7 @@ pub async fn play_executor(
             }
         }
 
-        info!("player_notification_loop_task");
+        //info!("player_notification_loop_task");
 
         Ok(())
     };
@@ -808,11 +807,11 @@ pub async fn play_executor(
 
     match thread_ressults.iter().find(|x| x.is_err()) {
         Some(result) => {
-            info!("EXIT_FINAL_1");
+            //info!("EXIT_FINAL_1");
             result.clone()
         }
         None => {
-            info!("EXIT_FINAL_2");
+            //info!("EXIT_FINAL_2");
             Ok(())
         }
     }

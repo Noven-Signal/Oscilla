@@ -5,7 +5,7 @@ use std::{
 
 use symphonia::core::{audio::Signal, formats::SeekedTo};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tracing::info;
+
 
 use crate::{
     decoder_wrapper::{DecodeResult, DecoderWrapper},
@@ -295,7 +295,7 @@ pub fn decode_loop(
                     renderer_to_decoder_sync_signal_recv,
                     seek_signal_for_decoder_ve_channels,
                 })) => {
-                    info!("decoder_seek_signal");
+                    //info!("decoder_seek_signal");
 
                     let (sync_obj_increment, ve_enabled_flg_for_completed_notification) =
                         match seek_signal_for_decoder_ve_channels {
@@ -332,8 +332,8 @@ pub fn decode_loop(
                                 last_seeked_sample = actual_ts;
                                 convert_sample_count_to_sec_f64(actual_ts)
                             }
-                            Err(x) => {
-                                info!("Decode Init Error {x}");
+                            Err(_) => {
+                                //info!("Decode Init Error {x}");
                                 convert_sample_count_to_sec_f64(current_played_sample)
                             }
                         }
@@ -347,7 +347,7 @@ pub fn decode_loop(
                     };
                     _ = decoder_to_player_notification_signal
                         .send(WorkerToPlayerNotification::SeekCompleteFromDecoder(signal));
-                    info!("decoder_seek_completed");
+                    //info!("decoder_seek_completed");
                 }
                 None => break 'l1,
             }

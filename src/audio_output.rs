@@ -3,7 +3,6 @@ use std::cmp;
 use imp::CreateEventW;
 use std::ptr::null;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tracing::info;
 
 use windows::Win32::Foundation::{HANDLE, WAIT_EVENT};
 use windows::Win32::System::Threading::{INFINITE, WaitForSingleObject};
@@ -207,7 +206,7 @@ impl<'a> AudioOutput<'a> {
             >,
              read_exclusive: usize,
              end_of_stream_block: &mut Option<EndOfStreamBlockInfo>| {
-                info!("singnal_to_thread_rebderer_a");
+                //info!("singnal_to_thread_rebderer_a");
                 match decoder_to_renderer_singal_recv.blocking_recv() {
                     Some(DecoderToRendererSyncSignal::Sync) => {}
                     Some(DecoderToRendererSyncSignal::EndOfStream(EndOfStreamSignal {
@@ -292,7 +291,7 @@ impl<'a> AudioOutput<'a> {
                         self.current_seek_no = seek_no;
 
                         sync_obj.complete_sync.wait(1);
-                        info!("renderer_seek_completed");
+                        //info!("renderer_seek_completed");
                         return Ok(RenderLoopEndReason::Seek);
                     }
                     _ => break 'l1,

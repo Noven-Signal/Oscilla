@@ -3,7 +3,7 @@ name = "exp-componet"
 version = "0.1.0"
 edition = "2024"
 description = "exp-component"
-authors = ["Noven-Signal <novensignal913@gmail.com>"]
+authors = ["Noven-Signal"]
 build = "build.rs"
 
 
