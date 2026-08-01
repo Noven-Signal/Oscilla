@@ -1,12 +1,8 @@
 use std::{
-    convert::TryFrom,
-    fmt::{self, Debug, Display},
-    panic,
-    sync::{
+    convert::TryFrom, fmt::{self, Debug, Display}, panic, pin::Pin, sync::{
         Arc, Condvar, Mutex,
         atomic::{AtomicPtr, AtomicU8, Ordering},
-    },
-    time::Duration,
+    }, time::Duration,
 };
 
 use tokio::{
@@ -17,10 +13,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
+    app::{PlayerToUISingnal, PlayerToUISingnalVeEnabled, SeekCompleteSignal, TrackInfo},
     audio_decoder::decode_loop,
     audio_output,
     decoder_wrapper::DecoderWrapper,
-    app::{PlayerToUISingnal, PlayerToUISingnalVeEnabled, SeekCompleteSignal, TrackInfo},
     utils::array_init,
     visual_effects::oscilloscope::{VeControlSignalInner, ve_loop},
 };
@@ -159,7 +155,7 @@ pub struct VeEnabledInfoFromDecoder {
     pub decorder_to_ve_signal_recv: UnboundedReceiver<DecorderToVeSyncSignal>,
     pub ve_to_decoder_signal_sender: UnboundedSender<VeToDecoderSyncSignal>,
     pub ve_buffer_duration_offset_sec: f64,
-    pub ve_shared_buffer: AtomicPtr<VESharedBuffer>,
+    pub ve_shared_buffer: AtomicPtr<Pin<Box<VESharedBuffer>>>,
 }
 
 pub struct VeEnabledInfoFromPlayerToVe {
@@ -170,9 +166,8 @@ pub struct VeEnabledInfoFromPlayerToVe {
 
     pub ve_to_ui_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
     pub ui_to_ve_signal_recv: UnboundedReceiver<UiVEThreadSyncSignal>,
-    pub ve_shared_buffer: AtomicPtr<VESharedBuffer>,
+    pub ve_shared_buffer: AtomicPtr<Pin<Box<VESharedBuffer>>>,
     pub ve_control_signal_inner_recv: UnboundedReceiver<VeControlSignalInner>,
-    //  pub cancellation_token: CancellationToken,
 }
 
 #[derive(Debug)]
@@ -197,7 +192,7 @@ pub enum PlayerControlSignal {
     Pause,
     Resume,
     Stop,
-    VeEnabled(AtomicPtr<VESharedBuffer>),
+    VeEnabled(AtomicPtr<Pin<Box<VESharedBuffer>>>),
     VeDisabled,
     Seek(UiToPlayerSeekSignal),
 }
@@ -213,7 +208,7 @@ pub struct VeEnabledSignalFromPlayerToDecoder {
     pub decorder_to_ve_signal_recv: UnboundedReceiver<DecorderToVeSyncSignal>,
     pub ve_to_decoder_signal_sender: UnboundedSender<VeToDecoderSyncSignal>,
     pub ve_to_decoder_signal_recv: UnboundedReceiver<VeToDecoderSyncSignal>,
-    pub ve_shared_buffer: AtomicPtr<VESharedBuffer>,
+    pub ve_shared_buffer: AtomicPtr<Pin<Box<VESharedBuffer>>>,
 }
 
 pub enum VeControlSignal {
@@ -292,7 +287,7 @@ pub async fn play_executor(
     let (renderer_to_decoder_sender, renderer_to_docoder_reciever) = mpsc::unbounded_channel();
     let (decoder_to_renderer_sender, decoder_to_renderer_reciever) = mpsc::unbounded_channel();
 
-    let mut shared_buffer = array_init(|| array_init(|| vec![0f32; 0]));
+    let mut shared_buffer = Box::pin(array_init(|| array_init(|| vec![0f32; 0])));
 
     let shared_buffer_for_decoder = AtomicPtr::new(&raw mut shared_buffer);
     let shared_buffer_for_renderer = AtomicPtr::new(&raw mut shared_buffer);
@@ -381,7 +376,8 @@ pub async fn play_executor(
                     }) => {
                         let ve_shared_buffer = unsafe { retrieve_ref(&ve_shared_buffer) };
 
-                        _ = player_to_ui_singnal_sender_for_ve.send(PlayerToUISingnal::VeEnabledSync);
+                        _ = player_to_ui_singnal_sender_for_ve
+                            .send(PlayerToUISingnal::VeEnabledSync);
 
                         ve_loop(
                             shared_buffer,
@@ -598,7 +594,8 @@ pub async fn play_executor(
                         };
 
                     for _ in 0..NUM_OF_BLOCK - 2 - BACK_ROOM {
-                        _ = renderer_to_decoder_sync_signal_sender.send(RendererToDecoderSsynSignal());
+                        _ = renderer_to_decoder_sync_signal_sender
+                            .send(RendererToDecoderSsynSignal());
                     }
 
                     let seek_signal_for_renderer = SeekSignalForRenderer {

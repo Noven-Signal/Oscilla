@@ -1,4 +1,3 @@
-use std::{fmt::Debug, ops::Add, sync::atomic::AtomicPtr, time::Duration, usize};
 use crate::{
     app_state::{
         self,
@@ -21,6 +20,7 @@ use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use futures::{FutureExt, StreamExt, future};
 use ratatui::{prelude::Rect, widgets::StatefulWidget};
 use serde::{Deserialize, Serialize};
+use std::{fmt::Debug, ops::Add, sync::atomic::AtomicPtr, time::Duration, usize};
 use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     time::Interval,
@@ -430,9 +430,9 @@ impl App {
                         / crate::visual_effects::oscilloscope::FRAME_RATE;
                     let crate_move_window_size_vec =
                         || (0..move_window).map(|i| (i as f64, 0f64)).collect();
-                    let arr = array_init(|| {
+                    let arr = Box::pin(array_init(|| {
                         array_init(|| OscilloscopeData(crate_move_window_size_vec()))
-                    });
+                    }));
                     Some(arr)
                 };
                 let ve_shared_buffer = app_state_container
@@ -463,7 +463,8 @@ impl App {
 
                 let target_tab = self.app_state_container.ve_selected;
                 if target_tab != VeSelectedTab::Off {
-                    _ = self.app_state_container
+                    _ = self
+                        .app_state_container
                         .ve_switcher_request_signal_sender
                         .send(VeSwitcherRequestSignal {
                             request_tab: target_tab,

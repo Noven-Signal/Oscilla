@@ -11,7 +11,6 @@ pub struct AppRoot {}
 impl StatefulWidget for AppRoot {
     type State = AppStateContainer;
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut AppStateContainer) {
-        // fn draw(&mut self, f: &mut Frame, area: Rect) -> color_eyre::Result<()> {
         let [top, bottom] = area.layout(
             &Layout::default()
                 .direction(Direction::Vertical)

@@ -1,6 +1,7 @@
 pub mod app_state {
     use std::fmt::Debug;
-    use std::slice::Iter;
+    use std::pin::Pin;
+use std::slice::Iter;
     use std::sync::Arc;
     use std::time::Duration;
     use crossterm::event::KeyCode;
@@ -280,7 +281,7 @@ pub mod app_state {
         pub play_state: PlayState,
         pub playing_track_info: Option<PlayingTrackInfo>,
         pub player_thread: Option<PlayerThread>,
-        pub ve_shared_buffer: Option<VESharedBuffer>,
+        pub ve_shared_buffer: Option<Pin<Box<VESharedBuffer>>>,
         pub ve_selected: VeSelectedTab,
         pub ve_channel: Option<Ves>,
         pub ve_switcher_request_signal_sender: UnboundedSender<VeSwitcherRequestSignal>,
