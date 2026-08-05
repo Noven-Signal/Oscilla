@@ -1,8 +1,8 @@
 [package]
-name = "exp-componet"
+name = "Oscilla"
 version = "0.1.0"
 edition = "2024"
-description = "exp-component"
+description = "Oscilla"
 authors = ["Noven-Signal"]
 build = "build.rs"
 

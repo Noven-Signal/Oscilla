@@ -5,13 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug executable 'exp-componet'",
+            "name": "Debug executable 'Oscilla'",
             "type": "lldb",
             "request": "launch",
             "cargo": {
                 "args": [
                     "run",
-                    "--bin=exp-componet"
+                    "--bin=Oscilla"
                 ]
             },
             "args": [
@@ -25,13 +25,13 @@
             ]
         },
         {
-            "name": "Debug unit tests in executable 'exp-componet'",
+            "name": "Debug unit tests in executable 'Oscilla'",
             "type": "lldb",
             "request": "launch",
             "cargo": {
                 "args": [
                     "test",
-                    "--bin=exp-componet"
+                    "--bin=Oscilla"
                 ]
             }
         }

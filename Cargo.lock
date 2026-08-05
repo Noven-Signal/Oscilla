@@ -3,6 +3,42 @@
 version = 4
 
 [[package]]
+name = "Oscilla"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "better-panic",
+ "clap",
+ "color-eyre",
+ "config",
+ "crossterm 0.28.1",
+ "directories",
+ "futures",
+ "human-panic",
+ "json5",
+ "lazy_static",
+ "libc",
+ "pretty_assertions",
+ "rand 0.10.1",
+ "ratatui",
+ "rubato",
+ "serde",
+ "serde_json",
+ "signal-hook 0.3.18",
+ "strip-ansi-escapes",
+ "strum 0.26.3",
+ "symphonia",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+ "urlencoding",
+ "vergen-gix",
+ "windows 0.56.0",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -887,42 +923,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df61bf483e837f88d5c2291dcf55c67be7e676b3a51acc48db3a7b163b91ed63"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "exp-componet"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "better-panic",
- "clap",
- "color-eyre",
- "config",
- "crossterm 0.28.1",
- "directories",
- "futures",
- "human-panic",
- "json5",
- "lazy_static",
- "libc",
- "pretty_assertions",
- "rand 0.10.1",
- "ratatui",
- "rubato",
- "serde",
- "serde_json",
- "signal-hook 0.3.18",
- "strip-ansi-escapes",
- "strum 0.26.3",
- "symphonia",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-error",
- "tracing-subscriber",
- "urlencoding",
- "vergen-gix",
- "windows 0.56.0",
 ]
 
 [[package]]
