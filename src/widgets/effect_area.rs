@@ -1,3 +1,11 @@
+use crate::{
+    app::Ves,
+    app_state::app_state::{
+        AppStateContainer, AreaHandler, PlayingTrackInfo, VeSelectedTab, VeSwitcherRequestSignal,
+    },
+    extensions::rect::RectExtension,
+    get_decorated_border,
+};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     prelude::{Buffer, Rect},
@@ -6,15 +14,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Axis, Chart, Dataset, GraphType, StatefulWidget, Tabs, Widget},
 };
-use crate::{
-    app_state::app_state::{
-        AppStateContainer, AreaHandler, PlayingTrackInfo, VeSelectedTab, VeSwitcherRequestSignal,
-    },
-    app::Ves,
-    extensions::rect::RectExtension,
-    get_decorated_border,
-};
-
 #[derive(Default)]
 pub struct EffectArea {}
 
@@ -47,6 +46,10 @@ impl StatefulWidget for EffectArea {
         let Some(ref ve_shared_buffer) = state.ve_shared_buffer else {
             return;
         };
+
+        if let Some(_) = state.player_request_state{
+            return;
+        }
 
         let [left_ch_area, right_ch_area] = area.margin(None).layout(
             &Layout::default()

@@ -784,6 +784,7 @@ impl App {
         // app_state_container.play_state = PlayState::Seeking(playing_idx);
         app_state_container.player_request_state = Some(PlayerRequestState::Seek(new_seek_no));
         playing_track_info.seeking_duration = Some(reqest_pos);
+        app_state_container.ve_channel = None;
 
         _ = player_control_singnal_sender.send(PlayerControlSignal::Seek(UiToPlayerSeekSignal {
             target_duration: reqest_pos,
