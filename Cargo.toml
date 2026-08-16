@@ -62,6 +62,7 @@ rand = "0.10.1"
 [build-dependencies]
 anyhow = "1.0.90"
 vergen-gix = { version = "9.1.0", features = ["build", "cargo"] }
+winresource = "0.1.31"
 
 # Read the optimization guideline for more details: https://ratatui.rs/recipes/apps/release-your-app/#optimizations
 [profile.release]

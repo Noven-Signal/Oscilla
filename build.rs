@@ -2,6 +2,14 @@ use anyhow::Result;
 use vergen_gix::{BuildBuilder, CargoBuilder, Emitter, GixBuilder};
 
 fn main() -> Result<()> {
+    if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon("assets/Osiclla_256_256.ico");
+        res.set("ProductName", "Oscilla");
+
+        res.compile().unwrap();
+    }
+
     let build = BuildBuilder::all_build()?;
     let gix = GixBuilder::all_git()?;
     let cargo = CargoBuilder::all_cargo()?;
