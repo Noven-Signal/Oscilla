@@ -71,7 +71,7 @@ pub fn ve_loop(
 
                 ve_to_decoder_signal_sender = ve_to_decoder_sync_signal_sender_got;
                 decoder_to_ve_recv = decoder_to_ve_sync_signal_recv_got;
-                sync_obj.complete_sync.wait(1);
+                sync_obj.wait(1);
 
                 let (ve_to_ui_signal_sender_temp, ve_to_ui_signal_recv) = unbounded_channel();
                 let (ui_to_ve_signal_sender, ui_to_ve_signal_recv_temp) = unbounded_channel();

@@ -290,7 +290,7 @@ impl<'a> AudioOutput<'a> {
 
                         self.current_seek_no = seek_no;
 
-                        sync_obj.complete_sync.wait(1);
+                        sync_obj.wait(1);
                         //info!("renderer_seek_completed");
                         return Ok(RenderLoopEndReason::Seek);
                     }

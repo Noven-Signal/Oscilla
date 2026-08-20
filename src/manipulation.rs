@@ -63,11 +63,7 @@ impl SeekTimingSyncObj {
         condvar.notify_all();
     }
 }
-#[derive(Debug)]
-pub struct SeekTimingSyncState {
-    pub init_sync: SeekTimingSyncObj,
-    pub complete_sync: SeekTimingSyncObj,
-}
+
 #[derive(Debug)]
 pub struct SeekSignalForDecoderVeChannels {
     pub decoder_to_ve_sync_signal_sender: UnboundedSender<DecorderToVeSyncSignal>,
@@ -75,7 +71,7 @@ pub struct SeekSignalForDecoderVeChannels {
 }
 #[derive(Debug)]
 pub struct SeekSignalForDecoder {
-    pub sync_obj: Arc<SeekTimingSyncState>,
+    pub sync_obj: Arc<SeekTimingSyncObj>,
     pub target_duration: Duration,
     pub decoder_to_renderer_sync_signal_sender: UnboundedSender<DecoderToRendererSyncSignal>,
     pub renderer_to_decoder_sync_signal_recv: UnboundedReceiver<RendererToDecoderSsynSignal>,
@@ -84,7 +80,7 @@ pub struct SeekSignalForDecoder {
 }
 #[derive(Debug)]
 pub struct SeekSignalForRenderer {
-    pub sync_obj: Arc<SeekTimingSyncState>,
+    pub sync_obj: Arc<SeekTimingSyncObj>,
     pub renderer_to_decoder_sync_signal_sender: UnboundedSender<RendererToDecoderSsynSignal>,
     pub decoder_to_renderer_sync_signal_recv: UnboundedReceiver<DecoderToRendererSyncSignal>,
     pub seek_no: u64,
@@ -92,7 +88,7 @@ pub struct SeekSignalForRenderer {
 
 #[derive(Debug)]
 pub struct SeekSignalForVe {
-    pub sync_obj: Arc<SeekTimingSyncState>,
+    pub sync_obj: Arc<SeekTimingSyncObj>,
     pub ve_to_decoder_sync_signal_sender: UnboundedSender<VeToDecoderSyncSignal>,
     pub decoder_to_ve_sync_signal_recv: UnboundedReceiver<DecorderToVeSyncSignal>,
 }
@@ -546,11 +542,8 @@ pub async fn play_executor(
                             UnboundedSender<VeToDecoderSyncSignal>,
                     }
                     let target_duration = signal.target_duration;
-                    let sync_obj = SeekTimingSyncState {
-                        init_sync: SeekTimingSyncObj::new(),
-                        complete_sync: SeekTimingSyncObj::new(),
-                    };
-                    let sync_obj = Arc::new(sync_obj);
+                   
+                    let sync_obj = Arc::new(SeekTimingSyncObj::new());
 
                     let (
                         renderer_to_decoder_sync_signal_sender,

@@ -4,10 +4,9 @@ use color_eyre::eyre::Ok;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-use crate::config;
 
 lazy_static::lazy_static! {
-    pub static ref LOG_ENV: String = format!("{}_LOG_LEVEL", config::PROJECT_NAME.clone());
+    pub static ref LOG_ENV: String = format!("{}_LOG_LEVEL", env!("CARGO_CRATE_NAME").to_uppercase().to_string());
     pub static ref LOG_FILE: String = format!("{}.log", env!("CARGO_PKG_NAME"));
 }
 

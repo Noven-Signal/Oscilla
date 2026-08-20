@@ -339,7 +339,7 @@ pub fn decode_loop(
                         }
                     };
 
-                    sync_obj.complete_sync.wait(sync_obj_increment);
+                    sync_obj.wait(sync_obj_increment);
                     let signal = SeekCompleteFromDecoderSignal {
                         actual_seek_duration_sec: actual_ts_sec_f64,
                         seek_no,

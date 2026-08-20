@@ -19,8 +19,7 @@ use crossterm::event::Event as CrosstermEvent;
 use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::{FutureExt, StreamExt, future};
 use ratatui::{prelude::Rect, widgets::StatefulWidget};
-use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, ops::Add, sync::atomic::AtomicPtr, time::Duration, usize};
+use std::{ops::Add, sync::atomic::AtomicPtr, time::Duration, usize};
 use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     time::Interval,
@@ -52,12 +51,6 @@ pub struct App {
     player_to_ui_signal_recv: Option<UnboundedReceiver<PlayerToUISingnal>>,
     app_control_signal_recv: UnboundedReceiver<AppContorlSignal>,
     popup_queue_signal_recv: UnboundedReceiver<PopupObject>,
-}
-
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Mode {
-    #[default]
-    Home,
 }
 
 pub struct TrackInfo {
