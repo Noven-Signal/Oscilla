@@ -1,11 +1,9 @@
-use std::path::Path;
-
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
     app::{App, AppContorlSignal, PopupObject},
     app_state::app_state::AppStateContainer,
-    shared::SUPPORTED_EXTENSIONS,
+    shared::filter_valid_extension,
     widgets::app_root::*,
 };
 
@@ -32,23 +30,12 @@ async fn main() -> color_eyre::Result<()> {
     crate::errors::init()?;
     crate::logging::init()?;
 
-    let filter = |arg: &String| match Path::extension(Path::new(arg)) {
-        Some(os_str) => {
-            if let Some(ext_str) = os_str.to_str() {
-                SUPPORTED_EXTENSIONS.contains(&ext_str.to_lowercase().as_str())
-            } else {
-                false
-            }
-        }
-        None => false,
-    };
-
     let current_exe = std::env::current_exe().expect("fail to retreive executable path");
     let current_exe_path = current_exe
         .to_str()
         .expect("fail to parse current executable path");
     let filtered_args = std::env::args()
-        .filter(filter)
+        .filter(filter_valid_extension)
         .filter(|arg| arg != current_exe_path)
         .collect::<Vec<String>>();
 

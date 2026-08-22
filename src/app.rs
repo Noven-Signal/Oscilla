@@ -10,7 +10,7 @@ use crate::{
         self, NUM_OF_BLOCK_VE, OscilloscopeData, PlayerControlSignal, SeekCompleteFromVeSignal,
         UiToPlayerSeekSignal, UiVEThreadSyncSignal,
     },
-    shared::SUPPORTED_EXTENSIONS,
+    shared::{SUPPORTED_EXTENSIONS, filter_valid_extension},
     tui::Tui,
     utils::array_init,
     widgets::{app_root::AppRoot, popup::Popup},
@@ -27,7 +27,7 @@ use windows::Win32::UI::Shell::{
     SIGDN_FILESYSPATH,
 };
 
-use std::{ops::Add, path::Path, sync::atomic::AtomicPtr, time::Duration, usize};
+use std::{ops::Add, sync::atomic::AtomicPtr, time::Duration, usize};
 use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     time::Interval,
@@ -887,14 +887,7 @@ impl App {
                 let item = items.GetItemAt(index)?;
                 let path = item.GetDisplayName(SIGDN_FILESYSPATH)?;
                 let path_str = path.to_string()?;
-                let is_valiad_extensions = match Path::extension(Path::new(&path_str)) {
-                    Some(os_str) => match os_str.to_str() {
-                        Some(str) => SUPPORTED_EXTENSIONS.contains(&str),
-                        None => false,
-                    },
-                    None => false,
-                };
-                if !is_valiad_extensions {
+                if !filter_valid_extension(&path_str) {
                     continue;
                 }
                 paths.push(path.to_string()?);
