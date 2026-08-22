@@ -1,11 +1,12 @@
+use crate::app::App;
+use crate::app_state::app_state::{AppStateContainer, AreaHandler, PlayState};
+use crate::extensions::rect::RectExtension;
+use crate::utils::VecExt;
+use crate::{app_state, get_decorated_border};
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, HighlightSpacing, List, ListDirection, ListItem, Widget};
-use crate::app_state::app_state::{AppStateContainer, AreaHandler};
-use crate::app::App;
-use crate::extensions::rect::RectExtension;
-use crate::{app_state, get_decorated_border};
 
 #[derive(Default)]
 pub struct ListArea {}
@@ -35,11 +36,28 @@ impl StatefulWidget for ListArea {
             }
         });
 
+        let add_list_base = Span::raw("add files<Ctrl + O>");
+
+        let add_list_item = match state.play_list_selected.selected() {
+            Some(play_list_selected_idx)
+                if match state.play_list.last_index() {
+                    Some(play_list_last_idx) => play_list_last_idx + 1 == play_list_selected_idx,
+                    None => true,
+                } =>
+            {
+                add_list_base
+                    .style(Color::Red)
+                    .bg(Color::White)
+                    .into_centered_line()
+            }
+            _ => add_list_base.underlined().into_centered_line(),
+        };
+
+        let items = items.chain([ListItem::new(add_list_item)]);
+
         let list = List::new(items)
             .style(Color::White)
-            //.highlight_style(Style::new().yellow().italic())
             .highlight_spacing(HighlightSpacing::Never)
-            //.highlight_symbol("> ".red())
             .scroll_padding(1)
             .direction(ListDirection::TopToBottom)
             .repeat_highlight_symbol(true);
@@ -59,10 +77,43 @@ impl AreaHandler for ListArea {
             KeyCode::Up => app_state_container.play_list_selected.select_previous(),
             KeyCode::Down => app_state_container.play_list_selected.select_next(),
             KeyCode::Enter => 'b1: {
+                let Some(selected_idx) = app_state_container.play_list_selected.selected() else {
+                    break 'b1;
+                };
+                match selected_idx {
+                    _x if app_state_container
+                        .play_list
+                        .last_index()
+                        .is_some_and(|playlist_last_idx| selected_idx <= playlist_last_idx) =>
+                    {
+                        App::play_track(app_state_container, selected_idx)
+                    }
+                    _ => App::add_new_files(app_state_container),
+                };
+            }
+            KeyCode::Delete => 'b1: {
                 let Some(idx) = app_state_container.play_list_selected.selected() else {
                     break 'b1;
                 };
-                App::play_track(app_state_container, idx);
+                if let PlayState::Playing(playing_idx) | PlayState::Paused(playing_idx) =
+                    app_state_container.play_state
+                    && idx == playing_idx
+                {
+                    break 'b1;
+                };
+                let Some(_) = app_state_container.play_list.get(idx) else {
+                    break 'b1;
+                };
+                app_state_container.play_list.remove(idx);
+                match app_state_container.play_state {
+                    PlayState::Playing(ref mut playing_idx)
+                    | PlayState::Paused(ref mut playing_idx)
+                        if idx < *playing_idx =>
+                    {
+                        *playing_idx = playing_idx.saturating_sub(1);
+                    }
+                    _ => {}
+                };
             }
             _ => {}
         }

@@ -1,15 +1,6 @@
 pub mod app_state {
-    use std::fmt::Debug;
-    use std::pin::Pin;
-use std::slice::Iter;
-    use std::sync::Arc;
-    use std::time::Duration;
-    use crossterm::event::KeyCode;
-    use ratatui::widgets::ListState;
-    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-    use tokio::task::JoinHandle;
-    use crate::audio_file_info::AudioFileInfo;
     use crate::app::{AppContorlSignal, PlayerRequestState, PopupObject, Ves};
+    use crate::audio_file_info::AudioFileInfo;
     use crate::manipulation::{PlayerControlSignal, PlayerExecutorError, VESharedBuffer};
     use crate::widgets::button::{ButtonIdent, PlayButtonState};
     use crate::widgets::button_area::ButtonsArea;
@@ -17,6 +8,14 @@ use std::slice::Iter;
     use crate::widgets::effect_area::EffectArea;
     use crate::widgets::list_area::ListArea;
     use crate::widgets::vol_area::VolArea;
+    use crossterm::event::KeyCode;
+    use ratatui::widgets::ListState;
+    use std::fmt::Debug;
+    use std::pin::Pin;
+    use std::slice::Iter;
+    use std::time::Duration;
+    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+    use tokio::task::JoinHandle;
 
     #[derive(Clone, Copy, Debug)]
     pub enum TabState {
@@ -276,7 +275,7 @@ use std::slice::Iter;
         pub focus_state: TabState,
         pub button_focus_state: ButtonIdent,
         pub vol_state: u16,
-        pub play_list: Arc<Vec<AudioFileInfo>>,
+        pub play_list: Vec<AudioFileInfo>,
         pub play_list_selected: ListState,
         pub play_state: PlayState,
         pub playing_track_info: Option<PlayingTrackInfo>,
@@ -292,6 +291,7 @@ use std::slice::Iter;
         pub played_frame_buffer: Option<u32>,
         pub player_request_state: Option<PlayerRequestState>,
         pub popup_object: Option<PopupObject>,
+        pub popup_queue_signal_sender: UnboundedSender<PopupObject>,
     }
 
     impl AppStateContainer {
@@ -303,43 +303,15 @@ use std::slice::Iter;
             let (ve_switcher_request_signal_sender, ve_switcher_request_signal_recv) =
                 unbounded_channel();
 
-            let (play_list, error_list) = categorize_into_two::<AudioFileInfo, String>(
-                list.iter(),
-                |path, play_list, error_list| {
-                    match AudioFileInfo::new(path) {
-                        Ok(info) => play_list.push(info),
-                        Err(_) => error_list.push(path.clone()),
-                    };
-                },
+            let play_list = Self::validate_audio_file_and_create_audio_file_info_list(
+                list,
+                popup_queue_signal_sender.clone(),
             );
-
-            fn categorize_into_two<T: Debug, U: Debug>(
-                input: Iter<'_, String>,
-                mut f: impl FnMut(&String, &mut Vec<T>, &mut Vec<U>),
-            ) -> (Vec<T>, Vec<U>) {
-                let mut x_0 = Vec::<T>::new();
-                let mut x_1 = Vec::<U>::new();
-
-                for ele in input {
-                    f(ele, &mut x_0, &mut x_1)
-                }
-                (x_0, x_1)
-            }
-
-            if !error_list.is_empty() {
-                let error_paths = error_list.join("\n");
-                let signal = PopupObject {
-                    title: "error".into(),
-                    message: format!("an error occurred during loading file: \n{error_paths}"),
-                    button_name: "OK".into(),
-                };
-                _ = popup_queue_signal_sender.send(signal);
-            }
 
             Self {
                 focus_state: TabState::None,
                 button_focus_state: ButtonIdent::PlayOrPause(PlayButtonState::Playing),
-                play_list: Arc::new(play_list),
+                play_list,
                 vol_state: 100,
                 play_list_selected: ListState::default(),
                 play_state: PlayState::Stopped,
@@ -356,7 +328,48 @@ use std::slice::Iter;
                 played_frame_buffer: None,
                 player_request_state: None,
                 popup_object: None,
+                popup_queue_signal_sender,
             }
+        }
+
+        pub fn validate_audio_file_and_create_audio_file_info_list(
+            list: Vec<String>,
+            popup_queue_signal_sender: UnboundedSender<PopupObject>,
+        ) -> Vec<AudioFileInfo> {
+            let (play_list, error_list) = Self::categorize_into_two::<AudioFileInfo, String>(
+                list.iter(),
+                |path, play_list, error_list| {
+                    match AudioFileInfo::new(path) {
+                        Ok(info) => play_list.push(info),
+                        Err(_) => error_list.push(path.clone()),
+                    };
+                },
+            );
+
+            if !error_list.is_empty() {
+                let error_paths = error_list.join("\n");
+                let signal = PopupObject {
+                    title: "error".into(),
+                    message: format!("an error occurred during loading file: \n{error_paths}"),
+                    button_name: "OK".into(),
+                };
+                _ = popup_queue_signal_sender.send(signal);
+            }
+
+            play_list
+        }
+
+        fn categorize_into_two<T: Debug, U: Debug>(
+            input: Iter<'_, String>,
+            mut f: impl FnMut(&String, &mut Vec<T>, &mut Vec<U>),
+        ) -> (Vec<T>, Vec<U>) {
+            let mut x_0 = Vec::<T>::new();
+            let mut x_1 = Vec::<U>::new();
+
+            for ele in input {
+                f(ele, &mut x_0, &mut x_1)
+            }
+            (x_0, x_1)
         }
     }
 }

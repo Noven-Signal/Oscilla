@@ -4,7 +4,7 @@ use symphonia::core::{meta::Tag, *};
 
 use crate::decoder_wrapper::{DecodeInitError, DecoderWrapper};
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct AudioFileInfo {
     pub file_path: String,
     pub title: Option<String>,

@@ -3,23 +3,25 @@ use std::path::Path;
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
-    app_state::app_state::AppStateContainer,
     app::{App, AppContorlSignal, PopupObject},
+    app_state::app_state::AppStateContainer,
+    shared::SUPPORTED_EXTENSIONS,
     widgets::app_root::*,
 };
 
+mod app;
 mod app_state;
 mod audio_decoder;
 mod audio_file_info;
 mod audio_output;
 mod decoder_wrapper;
-mod my_def_macro;
-mod resampler_wrapper;
-mod app;
 mod errors;
 mod extensions;
 mod logging;
 mod manipulation;
+mod my_def_macro;
+mod resampler_wrapper;
+mod shared;
 mod tui;
 mod utils;
 mod visual_effects;
@@ -33,10 +35,7 @@ async fn main() -> color_eyre::Result<()> {
     let filter = |arg: &String| match Path::extension(Path::new(arg)) {
         Some(os_str) => {
             if let Some(ext_str) = os_str.to_str() {
-                match ext_str {
-                    "wav" | "mp3" | "ogg" | "m4a" => true,
-                    _ => false,
-                }
+                SUPPORTED_EXTENSIONS.contains(&ext_str.to_lowercase().as_str())
             } else {
                 false
             }

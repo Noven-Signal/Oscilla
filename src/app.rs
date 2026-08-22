@@ -10,6 +10,7 @@ use crate::{
         self, NUM_OF_BLOCK_VE, OscilloscopeData, PlayerControlSignal, SeekCompleteFromVeSignal,
         UiToPlayerSeekSignal, UiVEThreadSyncSignal,
     },
+    shared::SUPPORTED_EXTENSIONS,
     tui::Tui,
     utils::array_init,
     widgets::{app_root::AppRoot, popup::Popup},
@@ -19,7 +20,14 @@ use crossterm::event::Event as CrosstermEvent;
 use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::{FutureExt, StreamExt, future};
 use ratatui::{prelude::Rect, widgets::StatefulWidget};
-use std::{ops::Add, sync::atomic::AtomicPtr, time::Duration, usize};
+use windows::Win32::Foundation::{ERROR_CANCELLED, HWND};
+
+use windows::Win32::UI::Shell::{
+    Common::COMDLG_FILTERSPEC, FOS_ALLOWMULTISELECT, FileOpenDialog, IFileOpenDialog,
+    SIGDN_FILESYSPATH,
+};
+
+use std::{ops::Add, path::Path, sync::atomic::AtomicPtr, time::Duration, usize};
 use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     time::Interval,
@@ -39,6 +47,7 @@ pub struct VeSwitcherSyncSignal();
 
 pub enum AppContorlSignal {
     StartPlayer(usize),
+    AddFilesDialogCallBack(windows::core::Result<Option<Vec<String>>>),
 }
 
 pub struct App {
@@ -131,25 +140,26 @@ impl App {
     }
 
     fn start_player(&mut self, idx: usize) {
-        if let Some(_) = self.app_state_container.player_thread {
+        let app_state_container = &mut self.app_state_container;
+
+        if let Some(_) = app_state_container.player_thread {
             return;
         }
+
+        let Some(target_track) = app_state_container.play_list.get(idx) else {
+            return;
+        };
 
         let (player_to_ui_signal_sender, player_to_ui_signal_recv) = unbounded_channel();
         self.player_to_ui_signal_recv = Some(player_to_ui_signal_recv);
 
-        let app_state_container = &mut self.app_state_container;
-
-        let play_list_arc = app_state_container.play_list.clone();
         app_state_container.play_state = PlayState::Playing(idx);
         let (player_control_signal_sender, mut player_control_signal_recv) = unbounded_channel();
 
         //app_state_container.player_control_singnal_sender = Some(player_control_signal_sender);
         let init_vol = app_state_container.vol_state;
+        let target_track = target_track.clone();
         let player_handle = tokio::spawn(async move {
-            let Some(target_track) = play_list_arc.get(idx) else {
-                return Result::Ok(());
-            };
             manipulation::play_executor(
                 &target_track.file_path,
                 init_vol,
@@ -288,6 +298,10 @@ impl App {
                            before_start_player_clean_up_statement!();
 
                             self.start_player(idx);
+                        }
+                        AppContorlSignal::AddFilesDialogCallBack(res) => {
+                            Self::add_newfiles_callback(&mut self.app_state_container, res);
+                            self.render()?;
                         }
                     }
                 }
@@ -638,6 +652,12 @@ impl App {
                 }
             }
             KeyEvent {
+                code: KeyCode::Char('o'),
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Self::add_new_files(&mut self.app_state_container),
+            KeyEvent {
                 code,
                 kind: KeyEventKind::Press,
                 ..
@@ -783,6 +803,106 @@ impl App {
             target_duration: reqest_pos,
             seek_no: new_seek_no,
         }));
+    }
+
+    pub fn add_new_files(app_state_container: &mut AppStateContainer) {
+        let app_control_signal_sender = app_state_container.app_control_signal_sender.clone();
+        tokio::spawn(async move {
+            let added_files = Self::select_multiple_files();
+            app_control_signal_sender.send(AppContorlSignal::AddFilesDialogCallBack(added_files))
+        });
+    }
+
+    fn add_newfiles_callback(
+        app_state_container: &mut AppStateContainer,
+        added_files: windows::core::Result<Option<Vec<String>>>,
+    ) {
+        use core::result::Result::*;
+        match added_files {
+            Ok(Some(files)) => {
+                let popup_queue_sender = app_state_container.popup_queue_signal_sender.clone();
+                let mut audio_file_info_list =
+                    AppStateContainer::validate_audio_file_and_create_audio_file_info_list(
+                        files,
+                        popup_queue_sender,
+                    );
+                let playlist = &mut app_state_container.play_list;
+                let append_before_playlist_len = playlist.len();
+
+                playlist.append(&mut audio_file_info_list);
+
+                if append_before_playlist_len == 0 {
+                    _ = app_state_container
+                        .app_control_signal_sender
+                        .send(AppContorlSignal::StartPlayer(0));
+                }
+            }
+            Ok(None) => {}
+            Err(_) => {
+                app_state_container.popup_object = Some(PopupObject::new(
+                    "an error occurred while opening file dialog".to_string(),
+                ))
+            }
+        }
+    }
+
+    fn select_multiple_files() -> windows::core::Result<Option<Vec<String>>> {
+        use core::result::Result::*;
+        use windows::{Win32::System::Com::*, core::*};
+        unsafe {
+            CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
+
+            let dialog: IFileOpenDialog =
+                CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+            dialog.SetOptions(FOS_ALLOWMULTISELECT)?;
+            let filter_name: Vec<u16> = "Supported audio files\0".encode_utf16().collect();
+            let filter_pattern: Vec<u16> = SUPPORTED_EXTENSIONS
+                .iter()
+                .map(|extension| format!("*.{extension}"))
+                .collect::<Vec<_>>()
+                .join(";")
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            use windows::core::PCWSTR;
+            let filter_specs = [COMDLG_FILTERSPEC {
+                pszName: PCWSTR((&filter_name).as_ptr()),
+                pszSpec: PCWSTR(filter_pattern.as_ptr()),
+            }];
+            dialog.SetFileTypes(&filter_specs)?;
+
+            match dialog.Show(HWND::default()) {
+                Ok(_) => {}
+                Err(e) if e.code() == HRESULT::from_win32(ERROR_CANCELLED.0) => {
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
+            }
+
+            let items = dialog.GetResults()?;
+            let count = items.GetCount()?;
+            let mut paths = Vec::with_capacity(count as usize);
+
+            for index in 0..count {
+                let item = items.GetItemAt(index)?;
+                let path = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+                let path_str = path.to_string()?;
+                let is_valiad_extensions = match Path::extension(Path::new(&path_str)) {
+                    Some(os_str) => match os_str.to_str() {
+                        Some(str) => SUPPORTED_EXTENSIONS.contains(&str),
+                        None => false,
+                    },
+                    None => false,
+                };
+                if !is_valiad_extensions {
+                    continue;
+                }
+                paths.push(path.to_string()?);
+                CoTaskMemFree(Some(path.0 as _));
+            }
+
+            Ok(Some(paths))
+        }
     }
 
     async fn handle_crossterm_event(&mut self, event: &CrosstermEvent) -> color_eyre::Result<()> {

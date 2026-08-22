@@ -84,7 +84,7 @@ impl DecoderWrapper {
 
         let decoder: Box<dyn Decoder> = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions { verify: true })
-            .unwrap();
+            .map_err(|_| DecodeInitError::FileOpenFailed)?;
 
         let track_id = track.id;
         Ok(Self {
