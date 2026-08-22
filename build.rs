@@ -6,6 +6,19 @@ fn main() -> Result<()> {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("assets/Osiclla_256_256.ico");
         res.set("ProductName", "Oscilla");
+                res.set_manifest(
+                        r#"
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+        <application xmlns="urn:schemas-microsoft-com:asm.v3">
+            <windowsSettings>
+                <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+                <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+            </windowsSettings>
+        </application>
+    </assembly>
+"#,
+                );
 
         res.compile().unwrap();
     }
