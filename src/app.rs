@@ -807,7 +807,7 @@ impl App {
 
     pub fn add_new_files(app_state_container: &mut AppStateContainer) {
         let app_control_signal_sender = app_state_container.app_control_signal_sender.clone();
-        tokio::spawn(async move {
+        tokio::task::spawn_blocking(move || {
             let added_files = Self::select_multiple_files();
             app_control_signal_sender.send(AppContorlSignal::AddFilesDialogCallBack(added_files))
         });
@@ -849,9 +849,7 @@ impl App {
     fn select_multiple_files() -> windows::core::Result<Option<Vec<String>>> {
         use core::result::Result::*;
         use windows::{Win32::System::Com::*, core::*};
-        unsafe {
-            CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
-
+        let proc = || unsafe {
             let dialog: IFileOpenDialog =
                 CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
             dialog.SetOptions(FOS_ALLOWMULTISELECT)?;
@@ -887,14 +885,19 @@ impl App {
                 let item = items.GetItemAt(index)?;
                 let path = item.GetDisplayName(SIGDN_FILESYSPATH)?;
                 let path_str = path.to_string()?;
-                if !filter_valid_extension(&path_str) {
-                    continue;
+                if filter_valid_extension(&path_str) {
+                    paths.push(path.to_string()?);
                 }
-                paths.push(path.to_string()?);
                 CoTaskMemFree(Some(path.0 as _));
             }
-
             Ok(Some(paths))
+        };
+
+        unsafe {
+            CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
+            let ret = proc();
+            CoUninitialize();
+            ret
         }
     }
 
