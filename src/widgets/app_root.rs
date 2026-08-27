@@ -1,9 +1,9 @@
-use ratatui::prelude::*;
-use ratatui::widgets::{Clear, Widget};
 use crate::app_state::app_state::AppStateContainer;
 use crate::widgets::bottom_part::BottomPart;
 use crate::widgets::popup::Popup;
 use crate::widgets::{effect_area::*, list_area::*};
+use ratatui::prelude::*;
+use ratatui::widgets::{Clear, Widget};
 
 #[derive(Default, Clone, Copy)]
 pub struct AppRoot {}
@@ -14,7 +14,7 @@ impl StatefulWidget for AppRoot {
         let [top, bottom] = area.layout(
             &Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Fill(1), Constraint::Length(6)]),
+                .constraints([Constraint::Fill(1), Constraint::Length(7)]),
         );
 
         let [list_area, effect_area] = top.layout(

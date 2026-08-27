@@ -5,6 +5,7 @@ use crate::{
     },
     extensions::rect::RectExtension,
     get_decorated_border,
+    key_guide::{KeyGuide, LineExt},
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout},
@@ -47,7 +48,7 @@ impl StatefulWidget for EffectArea {
             return;
         };
 
-        if let Some(_) = state.player_request_state{
+        if let Some(_) = state.player_request_state {
             return;
         }
 
@@ -139,5 +140,20 @@ impl AreaHandler for EffectArea {
             .send(VeSwitcherRequestSignal {
                 request_tab: target_tab,
             });
+    }
+
+    fn get_disp_bottom_line_text_area_selected<'a>(
+        _: &mut AppStateContainer,
+        available_width: usize,
+    ) -> Line<'a> {
+        Line::from_key_guide(
+            [
+                KeyGuide::ESC_DEFAULT,
+                KeyGuide::new_mazenta("←/→", "Select Visual Effect"),
+            ].into_iter()
+            .chain(KeyGuide::GLOBAL_GUIDES)
+            ,
+            available_width,
+        )
     }
 }

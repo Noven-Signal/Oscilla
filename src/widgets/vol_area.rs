@@ -1,5 +1,6 @@
 use crate::extensions::rect::RectExtension;
 use crate::get_decorated_border;
+use crate::key_guide::{KeyGuide, LineExt};
 use crate::manipulation::PlayerControlSignal;
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
@@ -56,5 +57,21 @@ impl AreaHandler for VolArea {
         {
             _ = player_control_singnal_sender.send(PlayerControlSignal::SetVol(after as u16));
         }
+    }
+
+    fn get_disp_bottom_line_text_area_selected<'a>(
+        _: &mut AppStateContainer,
+        available_width: usize,
+    ) -> Line<'a> {
+        Line::from_key_guide(
+            [
+                KeyGuide::ESC_DEFAULT,
+                KeyGuide::new_mazenta("↑/→", "Volume up"),
+                KeyGuide::new_mazenta("↓/←", "Volume down"),
+            ]
+            .into_iter()
+            .chain(KeyGuide::GLOBAL_GUIDES),
+            available_width,
+        )
     }
 }

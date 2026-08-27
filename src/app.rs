@@ -652,6 +652,14 @@ impl App {
                 }
             }
             KeyEvent {
+                code: KeyCode::Char(' '),
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => {
+                // TODO: play/pause
+            }
+            KeyEvent {
                 code: KeyCode::Char('o'),
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
@@ -660,6 +668,7 @@ impl App {
             KeyEvent {
                 code,
                 kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::NONE,
                 ..
             } => match code {
                 code if self.app_state_container.popup_object.is_some() => {

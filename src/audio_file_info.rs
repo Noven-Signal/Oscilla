@@ -4,7 +4,7 @@ use symphonia::core::{meta::Tag, *};
 
 use crate::decoder_wrapper::{DecodeInitError, DecoderWrapper};
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct AudioFileInfo {
     pub file_path: String,
     pub title: Option<String>,
@@ -14,7 +14,7 @@ pub struct AudioFileInfo {
 }
 
 impl AudioFileInfo {
-    pub fn new(path: &str) -> Result<Self,DecodeInitError> {
+    pub fn new(path: &str) -> Result<Self, DecodeInitError> {
         let mut decoder_wrapper = DecoderWrapper::new(path)?;
 
         let mapper = |tags: &[Tag]| {
@@ -44,16 +44,11 @@ impl AudioFileInfo {
                     _ => None,
                 }
             }
-            let file_name = {
-                let file_name = Path::new(path)
-                    .file_name()
-                    .and_then(|os_str| os_str.to_str());
-                if let Some(file_name) = file_name {
-                    file_name
-                } else {
-                    ""
-                }
-            };
+            let file_name = Path::new(path)
+                .file_name()
+                .and_then(|os_str| os_str.to_str())
+                .unwrap_or("");
+            
             audio_file_info.disp_name = match (&audio_file_info.title, &audio_file_info.artist_name)
             {
                 (None, None) => file_name.to_string(),

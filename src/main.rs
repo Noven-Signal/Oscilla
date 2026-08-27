@@ -24,6 +24,7 @@ mod tui;
 mod utils;
 mod visual_effects;
 mod widgets;
+mod key_guide;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {

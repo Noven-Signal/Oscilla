@@ -1,6 +1,7 @@
 use crate::app::App;
 use crate::app_state::app_state::{AppStateContainer, AreaHandler, PlayState};
 use crate::extensions::rect::RectExtension;
+use crate::key_guide::{KeyGuide, LineExt};
 use crate::utils::VecExt;
 use crate::{app_state, get_decorated_border};
 use crossterm::event::KeyCode;
@@ -121,5 +122,40 @@ impl AreaHandler for ListArea {
 
     fn lost_tab_selection_handler(app_state_container: &mut AppStateContainer) {
         app_state_container.play_list_selected.select(None);
+    }
+
+    fn get_disp_bottom_line_text_area_selected<'a>(
+        app_state_container: &mut AppStateContainer,
+        available_width: usize,
+    ) -> Line<'a> {
+        let audio_file_info = app_state_container
+            .play_list_selected
+            .selected()
+            .and_then(|idx| app_state_container.play_list.get(idx));
+
+        let file_desc = match audio_file_info {
+            Some(x) => {
+                Span::raw("      Now Selected: ") + Span::from(x.get_disp_name().to_string())
+            }
+            None => Line::default(),
+        };
+
+        let key_guides = Line::from_key_guide(
+            [
+                KeyGuide::ESC_DEFAULT,
+                KeyGuide::new_mazenta(
+                    "Enter",
+                    match audio_file_info {
+                        Some(_) => "Play Selected Item",
+                        None => "Open File Select Dialog",
+                    },
+                ),
+            ]
+            .into_iter()
+            .chain(KeyGuide::GLOBAL_GUIDES),
+            available_width.saturating_sub(file_desc.width()),
+        );
+
+        Line::from_iter(key_guides.spans.into_iter().chain(file_desc.spans))
     }
 }

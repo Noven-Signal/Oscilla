@@ -3,12 +3,10 @@ pub mod app_state {
     use crate::audio_file_info::AudioFileInfo;
     use crate::manipulation::{PlayerControlSignal, PlayerExecutorError, VESharedBuffer};
     use crate::widgets::button::{ButtonIdent, PlayButtonState};
-    use crate::widgets::button_area::ButtonsArea;
-    use crate::widgets::duration_bar_area::DurationBarArea;
-    use crate::widgets::effect_area::EffectArea;
-    use crate::widgets::list_area::ListArea;
-    use crate::widgets::vol_area::VolArea;
+
+    use crate::get_area_handler_fn;
     use crossterm::event::KeyCode;
+    use ratatui::text::Line;
     use ratatui::widgets::ListState;
     use std::fmt::Debug;
     use std::pin::Pin;
@@ -28,6 +26,8 @@ pub mod app_state {
         fn handle_key(app_state_container: &mut AppStateContainer, key_code: KeyCode);
         fn get_tab_selected_handler(_app_state_container: &mut AppStateContainer) {}
         fn lost_tab_selection_handler(_app_state_container: &mut AppStateContainer) {}
+
+        fn get_disp_bottom_line_text_area_selected<'a>(_app_state_container: &mut AppStateContainer, available_width:usize) -> Line<'a>;
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -38,23 +38,7 @@ pub mod app_state {
         ButtonsArea,
         VolArea,
     }
-    macro_rules! handle_key_via_trait {
-        ($ty:ty,$ident:ident) => {
-            <$ty as AreaHandler>::$ident
-        };
-    }
 
-    macro_rules! get_area_handler_fn {
-        ($self: ident,$ident:ident) => {
-            match $self {
-                Tabs::ListArea => handle_key_via_trait!(ListArea, $ident),
-                Tabs::EffectArea => handle_key_via_trait!(EffectArea, $ident),
-                Tabs::DurationBarArea => handle_key_via_trait!(DurationBarArea, $ident),
-                Tabs::ButtonsArea => handle_key_via_trait!(ButtonsArea, $ident),
-                Tabs::VolArea => handle_key_via_trait!(VolArea, $ident),
-            }
-        };
-    }
     impl Tabs {
         const fn get_next_zone(&self) -> NextZone {
             use Tabs::*;

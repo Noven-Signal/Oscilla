@@ -5,15 +5,16 @@ use ratatui::{
     prelude::{Buffer, Rect},
     style::Style,
     symbols,
-    text::Text,
+    text::{Line, Text},
     widgets::{LineGauge, StatefulWidget, Widget},
 };
 
 use crate::{
-    app_state::app_state::{AppStateContainer, AreaHandler, TabState, Tabs},
     app::App,
+    app_state::app_state::{AppStateContainer, AreaHandler, TabState, Tabs},
     extensions::rect::RectExtension,
     get_decorated_border,
+    key_guide::{KeyGuide, LineExt},
 };
 
 #[derive(Default)]
@@ -49,7 +50,12 @@ impl StatefulWidget for DurationBarArea {
                 let current = track_info.get_carib_duration().as_secs_f64();
                 let total = track_info.track_duraion.as_secs_f64();
                 let ratio = current / total;
-                if ratio > 1f64 { 1f64 } else { ratio }
+                match ratio {
+                    ..=0f64 => 0f64,
+                    1f64.. => 1f64,
+                    ratio if ratio.is_nan() || ratio.is_infinite() => 0f64,
+                    ratio => ratio,
+                }
             };
             remaining_time_str =
                 Duration::saturating_sub(track_info.track_duraion, track_info.get_carib_duration())
@@ -100,11 +106,28 @@ impl AreaHandler for DurationBarArea {
         match key_code {
             Left => App::seek_prev(app_state_container, Duration::from_secs(5)),
             Right => App::seek_forward(app_state_container, Duration::from_secs(5)),
-            Char(x) if matches!(x, '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9') => {
+            Char(x) if matches!(x, '0'..='9') => {
                 let seek_point = calc_seek_point(x.to_digit(10).unwrap());
                 App::seek(app_state_container, Duration::from_secs_f32(seek_point));
             }
             _ => {}
         }
+    }
+
+    fn get_disp_bottom_line_text_area_selected<'a>(
+        _: &mut AppStateContainer,
+        available_width: usize,
+    ) -> Line<'a> {
+        Line::from_key_guide(
+            [
+                KeyGuide::ESC_DEFAULT,
+                KeyGuide::new_mazenta("←", "Rewind 5sec"),
+                KeyGuide::new_mazenta("→", "Fast forward 5sec"),
+                KeyGuide::new_mazenta("0-9", "Go to [Number] / 10 position"),
+            ]
+            .into_iter()
+            .chain(KeyGuide::GLOBAL_GUIDES),
+            available_width,
+        )
     }
 }

@@ -1,8 +1,10 @@
 use crate::app::App;
 use crate::extensions::rect::RectExtension;
 use crate::get_decorated_border;
+use crate::key_guide::{KeyGuide, LineExt};
 use crate::manipulation::PlayerControlSignal;
 use crate::widgets::button::ButtonState;
+
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
@@ -59,6 +61,8 @@ impl StatefulWidget for ButtonsArea {
             buf,
             state,
         );
+
+        // ListArea
     }
 }
 
@@ -107,5 +111,32 @@ impl AreaHandler for ButtonsArea {
             ButtonIdent::Prev => App::play_previous(app_state_container),
             ButtonIdent::Next => App::play_next(app_state_container),
         }
+    }
+
+    fn get_disp_bottom_line_text_area_selected<'a>(
+        app_state_container: &mut AppStateContainer,
+        available_width: usize,
+    ) -> Line<'a> {
+        let key_guides = match app_state_container.button_focus_state {
+            ButtonIdent::PlayOrPause(_) => [
+                KeyGuide::ESC_DEFAULT,
+                KeyGuide::new_mazenta("Enter", "Play"),
+                KeyGuide::new_mazenta("→", "Move"),
+            ],
+            ButtonIdent::Prev => [
+                KeyGuide::ESC_DEFAULT,
+                KeyGuide::new_mazenta("Enter", "Play Prev Item"),
+                KeyGuide::new_mazenta("←/→", "Move"),
+            ],
+            ButtonIdent::Next => [
+                KeyGuide::ESC_DEFAULT,
+                KeyGuide::new_mazenta("Enter", "Play Next Item"),
+                KeyGuide::new_mazenta("←", "Move"),
+            ],
+        };
+        Line::from_key_guide(
+            key_guides.into_iter().chain(KeyGuide::GLOBAL_GUIDES.into_iter()),
+            available_width,
+        )
     }
 }
