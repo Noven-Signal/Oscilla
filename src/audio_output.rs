@@ -112,8 +112,9 @@ impl<'a> AudioOutput<'a> {
     #[allow(unsafe_op_in_unsafe_fn)]
     unsafe fn start(&mut self) -> Result<()> {
         self.audio_client.Start()?;
+        let mut paused = false;
         'seek_loop: loop {
-            match self.render_loop()? {
+            match self.render_loop(&mut paused)? {
                 RenderLoopEndReason::Stop => break 'seek_loop,
                 RenderLoopEndReason::Seek => continue 'seek_loop,
             }
@@ -175,7 +176,7 @@ impl<'a> AudioOutput<'a> {
     }
 
     #[allow(unsafe_op_in_unsafe_fn)]
-    unsafe fn render_loop(&mut self) -> Result<RenderLoopEndReason> {
+    unsafe fn render_loop(&mut self, paused: &mut bool) -> Result<RenderLoopEndReason> {
         const NUM_OF_BLOCK_LAST_INDEX: usize = NUM_OF_BLOCK - 1;
         let next_block = |read_exclusive| match read_exclusive {
             NUM_OF_BLOCK_LAST_INDEX => 0,
@@ -227,9 +228,8 @@ impl<'a> AudioOutput<'a> {
         'l1: loop {
             let get_block_len = |read_exclusive: usize| self.shared_buffer[read_exclusive][0].len();
 
-            let mut paused = false;
             'control_singal_loop: loop {
-                if self.control_signal_receiver.is_empty() && !paused {
+                if self.control_signal_receiver.is_empty() && !*paused {
                     break 'control_singal_loop;
                 }
 
@@ -241,12 +241,12 @@ impl<'a> AudioOutput<'a> {
                     }
                     Some(RendererControlSignal::Pause) => {
                         self.audio_client.Stop()?;
-                        paused = true;
+                        *paused = true;
                         continue 'control_singal_loop;
                     }
                     Some(RendererControlSignal::Resume) => {
                         self.audio_client.Start()?;
-                        paused = false;
+                        *paused = false;
                         continue 'control_singal_loop;
                     }
                     Some(RendererControlSignal::Stop) => {
@@ -267,7 +267,9 @@ impl<'a> AudioOutput<'a> {
                     })) => {
                         self.audio_client.Stop()?;
                         self.audio_client.Reset()?;
-                        self.audio_client.Start()?;
+                        if !*paused {
+                            self.audio_client.Start()?;
+                        }
 
                         self.renderer_to_decoder_singal_sender =
                             renderer_to_decoder_sync_signal_sender;
