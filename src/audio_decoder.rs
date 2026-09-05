@@ -3,14 +3,17 @@ use std::{
     ops::AddAssign,
 };
 
-use symphonia::core::{audio::Signal, formats::SeekedTo};
+use symphonia::core::{
+    audio::Signal,
+    formats::SeekedTo,
+    sample::{i24, u24},
+};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-
+use tracing::info;
 
 use crate::{
-    decoder_wrapper::{DecodeResult, DecoderWrapper},
-    resampler_wrapper::RsamplerWrapper,
     app::PlayerToUISingnal,
+    decoder_wrapper::{DecodeResult, DecoderWrapper},
     manipulation::{
         CHANNEL, DecoderControlSignal, DecoderToRendererSyncSignal, DecorderToVeSyncSignal,
         EndOfStreamSignal, NUM_OF_BLOCK, RendererToDecoderSsynSignal, SampleRate,
@@ -18,6 +21,7 @@ use crate::{
         SharedBuffer, VeEnabledInfoFromDecoder, VeEnabledSignalFromPlayerToDecoder,
         VeToDecoderSyncSignal, WorkerToPlayerNotification,
     },
+    resampler_wrapper::RsamplerWrapper,
     utils::array_init,
 };
 
@@ -355,8 +359,7 @@ pub fn decode_loop(
 
         let decoded = decoder_wrapper.decode();
 
-
-        let mut proc_f32 = |view: &[&[f32]]| -> Result<(),DecodeLoopError> {
+        let mut proc_f32 = |view: &[&[f32]]| -> Result<(), DecodeLoopError> {
             let fill_buff_within_block = |exclusive_buff: &mut [Vec<f32>; 2]| {
                 let copy_buff = |exclusive_buf: &mut [f32], view: &[f32]| {
                     let target_slice = &mut exclusive_buf[head..head + view.len()];
@@ -437,6 +440,26 @@ pub fn decode_loop(
             Ok(())
         };
 
+        macro_rules! handle_non_f32_data {
+            ($f: ident, $cow:ident) => {
+                for ch in 0..CHANNEL {
+                    for i in 0..$cow.chan(ch).len() {
+                        type_conversion_buff[ch][i] = $f($cow.chan(ch)[i])
+                    }
+                }
+                let type_conversion_buff_view =
+                    |i: usize| &type_conversion_buff[i][0..$cow.chan(i).len()];
+                let target = [0, 1].map(|i| type_conversion_buff_view(i));
+                proc_f32(&target)?;
+                current_played_sample.add_assign($cow.chan(0).len() as u64);
+            };
+        }
+
+        const I24_MAX: i32 = (1 << 23) - 1;
+        const U8_WAVE_CENTER: i16 = (1 << 8) / 2;
+        const U16_WAVE_CENTER: i32 = (1 << 16) / 2;
+        const U24_WAVE_CENTER: u32 = (1 << 24) / 2;
+        const U32_WAVE_CENTER: i64 = (1 << 32) / 2;
         use symphonia::core::audio::AudioBufferRef::*;
         match decoded {
             DecodeResult::Buf(audio_buffer_ref) => match audio_buffer_ref {
@@ -445,20 +468,46 @@ pub fn decode_loop(
                     proc_f32(&view)?;
                     current_played_sample.add_assign(cow.chan(0).len() as u64);
                 }
+                F64(cow) => {
+                    let f = |x| x as f32;
+                    handle_non_f32_data!(f, cow);
+                }
+                S8(cow) => {
+                    // untested. Because can't create data
+                    let f = |x| (x as f32) / (i8::MAX as f32);
+                    handle_non_f32_data!(f, cow);
+                }
                 S16(cow) => {
                     let f = |x| (x as f32) / (i16::MAX as f32);
-                    for ch in 0..CHANNEL {
-                        for i in 0..cow.chan(ch).len() {
-                            type_conversion_buff[ch][i] = f(cow.chan(ch)[i])
-                        }
-                    }
-                    let type_conversion_buff_view =
-                        |i: usize| &type_conversion_buff[i][0..cow.chan(i).len()];
-                    let target = [0, 1].map(|i| type_conversion_buff_view(i));
-                    proc_f32(&target)?;
-                    current_played_sample.add_assign(cow.chan(0).len() as u64);
+                    handle_non_f32_data!(f, cow);
                 }
-                _ => {}
+                S24(cow) => {
+                    let f = |x: i24| (x.0 as f32) / (I24_MAX as f32);
+                    handle_non_f32_data!(f, cow);
+                }
+                S32(cow) => {
+                    let f = |x| (x as f32) / (i32::MAX as f32);
+                    handle_non_f32_data!(f, cow);
+                }
+                U8(cow) => {
+                    let f = |x| ((x as i16) - U8_WAVE_CENTER) as f32 / (U8_WAVE_CENTER as f32);
+                    handle_non_f32_data!(f, cow);
+                }
+                U16(cow) => {
+                    // untested. Because can't create data
+                    let f = |x| ((x as i32) - U16_WAVE_CENTER) as f32 / (U16_WAVE_CENTER as f32);
+                    handle_non_f32_data!(f, cow);
+                }
+                U24(cow) => {
+                    // untested. Because can't create data
+                    let f = |x: u24| (x.0 - U24_WAVE_CENTER) as f32 / (U24_WAVE_CENTER as f32);
+                    handle_non_f32_data!(f, cow);
+                }
+                U32(cow) => {
+                    // untested. Because can't create data
+                    let f = |x| ((x as i64) - U32_WAVE_CENTER) as f32 / (U32_WAVE_CENTER as f32);
+                    handle_non_f32_data!(f, cow);
+                }
             },
             DecodeResult::Err(error) => {
                 return Err(DecodeLoopError::DecodeFailed(error.to_string()));
