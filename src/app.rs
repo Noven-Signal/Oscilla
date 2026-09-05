@@ -926,13 +926,9 @@ impl App {
     }
 
     fn render(&mut self) -> color_eyre::Result<()> {
-        self.partial_render(self.root_wiget)
-    }
-
-    fn partial_render(&mut self, app_root: AppRoot) -> color_eyre::Result<()> {
         self.tui.draw(|frame| {
             StatefulWidget::render(
-                app_root,
+                self.root_wiget,
                 frame.area(),
                 frame.buffer_mut(),
                 &mut self.app_state_container,
