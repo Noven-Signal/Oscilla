@@ -1,3 +1,5 @@
+use std::cmp;
+
 use crate::app::App;
 use crate::app_state::app_state::{AppStateContainer, AreaHandler, PlayState};
 use crate::extensions::rect::RectExtension;
@@ -124,10 +126,11 @@ impl AreaHandler for ListArea {
         app_state_container.play_list_selected.select(None);
     }
 
-    fn get_disp_bottom_line_text_area_selected<'a>(
-        app_state_container: &mut AppStateContainer,
-        available_width: usize,
-    ) -> Line<'a> {
+    fn render_bottom_line_text_area_selected(
+        buf: &mut Buffer,
+        area: Rect,
+        app_state_container: &mut AppStateContainer
+    ) {
         let audio_file_info = app_state_container
             .play_list_selected
             .selected()
@@ -135,10 +138,19 @@ impl AreaHandler for ListArea {
 
         let file_desc = match audio_file_info {
             Some(x) => {
-                Span::raw("      Now Selected: ") + Span::from(x.get_disp_name().to_string())
+                Span::raw("👉 ") + Span::from(x.get_disp_name().to_string())
             }
             None => Line::default(),
         };
+
+        let min_selected_width =
+            cmp::min(file_desc.width(), (area.width as f32 * 0.6) as usize) as u16;
+        let [keygides_area, selected_item_disp_area] = area.layout(
+            &Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Fill(1), Constraint::Max(min_selected_width)])
+                .spacing(1),
+        );
 
         let key_guides = Line::from_key_guide(
             [
@@ -147,15 +159,17 @@ impl AreaHandler for ListArea {
                     "Enter",
                     match audio_file_info {
                         Some(_) => "Play Selected Item",
-                        None => "Open File Select Dialog",
+                        None => "Open files",
                     },
                 ),
             ]
             .into_iter()
             .chain(KeyGuide::GLOBAL_GUIDES),
-            available_width.saturating_sub(file_desc.width()),
+           keygides_area.width.into()
         );
 
-        Line::from_iter(key_guides.spans.into_iter().chain(file_desc.spans))
+        key_guides.render(keygides_area, buf);
+        file_desc.render(selected_item_disp_area, buf);
+
     }
 }

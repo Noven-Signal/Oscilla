@@ -6,8 +6,10 @@ pub mod app_state {
 
     use crate::get_area_handler_fn;
     use crossterm::event::KeyCode;
-    use ratatui::text::Line;
-    use ratatui::widgets::ListState;
+    use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::text::Line;
+    use ratatui::widgets::{ListState, Widget};
     use std::fmt::Debug;
     use std::pin::Pin;
     use std::slice::Iter;
@@ -27,7 +29,15 @@ pub mod app_state {
         fn get_tab_selected_handler(_app_state_container: &mut AppStateContainer) {}
         fn lost_tab_selection_handler(_app_state_container: &mut AppStateContainer) {}
 
-        fn get_disp_bottom_line_text_area_selected<'a>(_app_state_container: &mut AppStateContainer, available_width:usize) -> Line<'a>;
+        fn get_disp_bottom_line_text_area_selected<'a>(_app_state_container: &mut AppStateContainer, _available_width:usize) -> Line<'a>{
+            Line::default()
+        }
+
+        fn render_bottom_line_text_area_selected(buf: &mut Buffer,area: Rect,app_state_container: &mut AppStateContainer){
+            let line = Self::get_disp_bottom_line_text_area_selected(app_state_container, area.width.into());
+            line.render(area, buf);
+        }
+        
     }
 
     #[derive(Clone, Copy, Debug)]

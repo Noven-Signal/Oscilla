@@ -23,18 +23,18 @@ impl<'a> KeyGuide<'a> {
         Self {
             key,
             desc,
-            color: Color::Rgb(170, 142, 176),
+            color: Color::Rgb(88, 61, 92),
         }
     }
 
     pub const ESC_DEFAULT: Self = KeyGuide {
         key: "Esc",
-        desc: "Cancel selection",
+        desc: "Cancel",
         color: Color::Magenta,
     };
 
     pub const GLOBAL_GUIDES: [KeyGuide<'static>; 2] = [
-        KeyGuide::new_gray("Ctrl+O", "Open file selection dialog"),
+        KeyGuide::new_gray("Ctrl+O", "Open files"),
         KeyGuide::new_gray("Ctrl+D", "Quit Oscilla"),
     ];
 }
@@ -51,16 +51,14 @@ impl LineExt for Line<'_> {
         available_width: usize,
     ) -> Line<'a> {
         let lines = key_guides.map(|x| {
-            Span::from(format!(" {} ", x.key)).bg(x.color)
-                + Span::raw(" ")
-                + Span::from(x.desc)
+            Span::from(format!(" {} ", x.key)).bg(x.color) + Span::raw(" ") + Span::from(x.desc)
         });
 
         let mut final_line = Line::default();
 
         'l1: for (idx, line) in lines.enumerate() {
-            let separator = Span::raw("   ");
             if idx != 0 {
+                let separator = Span::raw("   ");
                 match final_line.width() + separator.width() <= available_width {
                     true => final_line.spans.push(separator),
                     false => break 'l1,

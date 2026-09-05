@@ -1,3 +1,5 @@
+use std::cmp;
+
 use ratatui::prelude::*;
 
 use crate::app_state::app_state::{AppStateContainer, PlayState, TabState};
@@ -44,20 +46,27 @@ impl StatefulWidget for BottomPart {
 
         VolArea::default().render(volume_area, buf, state);
 
+        let bottom_text_area = bottom_text_area.margin(Some(Margin {
+            top: 1,
+            ..Default::default()
+        }));
+
         match state.focus_state {
             TabState::Focused(_) => Line::from_key_guide(
                 [
-                    KeyGuide::new_mazenta("Esc", "Cancel focus"),
-                    KeyGuide::new_mazenta("Enter", "Select area"),
-                    KeyGuide::new_mazenta("↑/↓/→/←", "Move Focus"),
+                    KeyGuide::new_mazenta("Esc", "Cancel"),
+                    KeyGuide::new_mazenta("Enter", "Select"),
+                    KeyGuide::new_mazenta("↑/↓/→/←", "Move"),
                 ]
                 .into_iter()
                 .chain(KeyGuide::GLOBAL_GUIDES),
                 buf.area.width as usize,
-            ),
+            )
+            .render(bottom_text_area, buf),
             TabState::Selected(tabs) => {
-                let func = get_area_handler_fn!(tabs, get_disp_bottom_line_text_area_selected);
-                func(state, buf.area.width as usize)
+                let render_bottom_line_text_area_selected =
+                    get_area_handler_fn!(tabs, render_bottom_line_text_area_selected);
+                render_bottom_line_text_area_selected(buf, bottom_text_area, state);
             }
             TabState::None => {
                 let now_playing_text = match state.play_state {
@@ -65,7 +74,7 @@ impl StatefulWidget for BottomPart {
                         match state.play_list.get(idx) {
                             Some(audio_file_info) => {
                                 let disp_name = audio_file_info.get_disp_name().to_string();
-                                Span::raw("     Now Playing:") + Span::raw(disp_name)
+                                Span::raw("🎵 ") + Span::raw(disp_name)
                             }
                             None => Line::default(),
                         }
@@ -73,26 +82,30 @@ impl StatefulWidget for BottomPart {
                     PlayState::Stopped => Line::default(),
                 };
 
+                let min_now_playing_width = cmp::min(
+                    now_playing_text.width(),
+                    (bottom_text_area.width as f32 * 0.6) as usize,
+                ) as u16;
+                let [keygides_area, now_palying_area] = bottom_text_area.layout(
+                    &Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([Constraint::Fill(1), Constraint::Max(min_now_playing_width)])
+                        .spacing(1),
+                );
+
                 let key_guides = Line::from_key_guide(
                     [KeyGuide::new_mazenta("↑/↓/→/←", "Move Focus")]
                         .into_iter()
-                        .chain(
-                            KeyGuide::GLOBAL_GUIDES
-                                .into_iter()
-                                .map(|x| KeyGuide::new_mazenta(x.key, x.desc)),
-                        ),
-                    (buf.area.width as usize).saturating_sub(now_playing_text.width()),
+                        .chain(KeyGuide::GLOBAL_GUIDES.into_iter()),
+                    keygides_area.width as usize,
                 );
 
-                Line::from_iter(key_guides.spans.into_iter().chain(now_playing_text.spans))
+                key_guides.render(keygides_area, buf);
+                now_playing_text.render(now_palying_area, buf);
+
+                // Line::from_iter(key_guides.spans.into_iter().chain(now_playing_text.spans))
+                //     .render(bottom_text_area, buf);
             }
-        }
-        .render(
-            bottom_text_area.margin(Some(Margin {
-                top: 1,
-                ..Default::default()
-            })),
-            buf,
-        );
+        };
     }
 }
