@@ -7,3 +7,4 @@ pub mod vol_area;
 pub mod app_root;
 pub mod duration_bar_area;
 pub mod popup;
+pub mod key_guide_area;
