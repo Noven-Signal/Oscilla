@@ -1,15 +1,15 @@
 use std::{
+    borrow::Cow,
     fmt::{self, Display},
     ops::AddAssign,
 };
 
 use symphonia::core::{
-    audio::Signal,
+    audio::{AudioBuffer, Signal},
     formats::SeekedTo,
-    sample::{i24, u24},
+    sample::{Sample, i24, u24},
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tracing::info;
 
 use crate::{
     app::PlayerToUISingnal,
@@ -222,6 +222,8 @@ pub fn decode_loop(
             }
         };
     }
+
+    let mut is_mono: Option<bool> = None;
 
     'l1: loop {
         if end_of_stream_reached || !decoder_control_signal.is_empty() {
@@ -440,18 +442,56 @@ pub fn decode_loop(
             Ok(())
         };
 
+        fn find_is_mono<S>(cow: &Cow<AudioBuffer<S>>, is_mono: &mut Option<bool>) -> bool
+        where
+            S: Sample,
+        {
+            match is_mono {
+                Some(value_ref) => *value_ref,
+                None => {
+                    let value = cow.spec().channels.count() == 1;
+                    *is_mono = Some(value);
+                    value
+                }
+            }
+        }
+
+        fn handle_non_f32_data_fn<S>(
+            f: impl Fn(S) -> f32,
+            cow: Cow<AudioBuffer<S>>,
+            type_conversion_buff: &mut [Vec<f32>; CHANNEL],
+            mut proc_f32: impl FnMut(&[&[f32]]) -> Result<(), DecodeLoopError>,
+            current_played_sample: &mut u64,
+            is_mono: &mut Option<bool>,
+        ) -> Result<(), DecodeLoopError>
+        where
+            S: Sample,
+        {
+            let is_mono = find_is_mono(&cow, is_mono);
+            for ch in 0..CHANNEL {
+                let cow_read_ch = if is_mono { 0 } else { ch };
+                for i in 0..cow.chan(cow_read_ch).len() {
+                    type_conversion_buff[ch][i] = f(cow.chan(cow_read_ch)[i]);
+                }
+            }
+            let type_conversion_buff_view =
+                |i: usize| &type_conversion_buff[i][0..cow.chan(if is_mono { 0 } else { i }).len()];
+            let target = [0, 1].map(|i| type_conversion_buff_view(i));
+            proc_f32(&target)?;
+            current_played_sample.add_assign(cow.chan(0).len() as u64);
+            Ok(())
+        }
+
         macro_rules! handle_non_f32_data {
             ($f: ident, $cow:ident) => {
-                for ch in 0..CHANNEL {
-                    for i in 0..$cow.chan(ch).len() {
-                        type_conversion_buff[ch][i] = $f($cow.chan(ch)[i])
-                    }
-                }
-                let type_conversion_buff_view =
-                    |i: usize| &type_conversion_buff[i][0..$cow.chan(i).len()];
-                let target = [0, 1].map(|i| type_conversion_buff_view(i));
-                proc_f32(&target)?;
-                current_played_sample.add_assign($cow.chan(0).len() as u64);
+                handle_non_f32_data_fn(
+                    $f,
+                    $cow,
+                    &mut type_conversion_buff,
+                    proc_f32,
+                    &mut current_played_sample,
+                    &mut is_mono,
+                )
             };
         }
 
@@ -464,49 +504,50 @@ pub fn decode_loop(
         match decoded {
             DecodeResult::Buf(audio_buffer_ref) => match audio_buffer_ref {
                 F32(cow) => {
-                    let view = [0, 1].map(|ch| cow.chan(ch));
+                    let is_mono = find_is_mono(&cow, &mut is_mono);
+                    let view = [0, 1].map(|ch| cow.chan(if is_mono { 0 } else { ch }));
                     proc_f32(&view)?;
                     current_played_sample.add_assign(cow.chan(0).len() as u64);
                 }
                 F64(cow) => {
                     let f = |x| x as f32;
-                    handle_non_f32_data!(f, cow);
+                    handle_non_f32_data!(f, cow)?;
                 }
                 S8(cow) => {
                     // untested. Because can't create data
                     let f = |x| (x as f32) / (i8::MAX as f32);
-                    handle_non_f32_data!(f, cow);
+                    handle_non_f32_data!(f, cow)?
                 }
                 S16(cow) => {
                     let f = |x| (x as f32) / (i16::MAX as f32);
-                    handle_non_f32_data!(f, cow);
+                    handle_non_f32_data!(f, cow)?
                 }
                 S24(cow) => {
                     let f = |x: i24| (x.0 as f32) / (I24_MAX as f32);
-                    handle_non_f32_data!(f, cow);
+                    handle_non_f32_data!(f, cow)?
                 }
                 S32(cow) => {
                     let f = |x| (x as f32) / (i32::MAX as f32);
-                    handle_non_f32_data!(f, cow);
+                    handle_non_f32_data!(f, cow)?
                 }
                 U8(cow) => {
                     let f = |x| ((x as i16) - U8_WAVE_CENTER) as f32 / (U8_WAVE_CENTER as f32);
-                    handle_non_f32_data!(f, cow);
+                    handle_non_f32_data!(f, cow)?
                 }
                 U16(cow) => {
                     // untested. Because can't create data
                     let f = |x| ((x as i32) - U16_WAVE_CENTER) as f32 / (U16_WAVE_CENTER as f32);
-                    handle_non_f32_data!(f, cow);
+                    handle_non_f32_data!(f, cow)?
                 }
                 U24(cow) => {
                     // untested. Because can't create data
                     let f = |x: u24| (x.0 - U24_WAVE_CENTER) as f32 / (U24_WAVE_CENTER as f32);
-                    handle_non_f32_data!(f, cow);
+                    handle_non_f32_data!(f, cow)?
                 }
                 U32(cow) => {
                     // untested. Because can't create data
                     let f = |x| ((x as i64) - U32_WAVE_CENTER) as f32 / (U32_WAVE_CENTER as f32);
-                    handle_non_f32_data!(f, cow);
+                    handle_non_f32_data!(f, cow)?
                 }
             },
             DecodeResult::Err(error) => {
