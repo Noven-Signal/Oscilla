@@ -150,14 +150,13 @@ impl AreaHandler for ListArea {
                 .spacing(1),
         );
 
-        let now_selected_item_is_now_playing = {
-            if let Some(now_playing_idx) = app_state_container.play_state.get_now_playing_idx()
-                && let Some(selected_idx) = app_state_container.play_list_selected.selected()
-            {
-                now_playing_idx == selected_idx
-            } else {
-                false
-            }
+        let now_selected_item_is_now_playing = if let Some(now_playing_idx) =
+            app_state_container.play_state.get_now_playing_idx()
+            && let Some(selected_idx) = app_state_container.play_list_selected.selected()
+        {
+            now_playing_idx == selected_idx
+        } else {
+            false
         };
 
         let key_guides = Line::from_key_guide(

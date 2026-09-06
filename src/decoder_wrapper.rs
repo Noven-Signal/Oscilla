@@ -12,6 +12,7 @@ use symphonia::core::meta::{Metadata, Tag};
 use symphonia::core::probe::{Hint, ProbeResult};
 use symphonia::core::units::Time;
 use symphonia::default::get_probe;
+use tracing::info;
 
 #[derive(Debug)]
 pub enum DecodeInitError {
@@ -98,7 +99,6 @@ impl DecoderWrapper {
     }
 
     pub fn decode(&mut self, current_played_sample: u64) -> DecodeResult<'_> {
-        self.n_frames.unwrap();
         if let Some(n_frames) = self.n_frames
             && current_played_sample >= n_frames
         {
@@ -106,7 +106,8 @@ impl DecoderWrapper {
         }
         let packet = match self.probe_result.format.next_packet() {
             Ok(p) => p,
-            Err(symphonia::core::errors::Error::IoError(_)) => {
+            Err(symphonia::core::errors::Error::IoError(err)) => {
+                info!("symphonia::core::errors::Error::IoError: {}", err);
                 return DecodeResult::IoError;
             }
             Err(err) => return DecodeResult::Err(err),

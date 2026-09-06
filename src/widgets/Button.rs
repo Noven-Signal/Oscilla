@@ -40,11 +40,11 @@ pub enum PlayButtonState {
 impl ButtonIdent {
     pub const fn get_disp_name(&self) -> &'static str {
         match self {
-            ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Playing) => "|| Pause",
-            ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Paused) => "||> Resume",
-            ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Stopped) => "| > Play",
-            ButtonIdent::Prev => "< prev",
-            ButtonIdent::Next => "next >",
+            ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Playing) => "❘❘ Pause",
+            ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Paused) => "❘▷ Resume",
+            ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Stopped) => "▷ Play",
+            ButtonIdent::Prev => "⇦ prev",
+            ButtonIdent::Next => "next ⇨",
             ButtonIdent::Stop => "■ Stop",
         }
     }
