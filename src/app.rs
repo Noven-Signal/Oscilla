@@ -560,8 +560,8 @@ impl App {
                 self.app_state_container.player_request_state = None;
             }
             PlayerToUISingnal::EndOfStream => 'b1: {
-                let next_idx = match self.app_state_container.play_state {
-                    PlayState::Playing(idx) | PlayState::Paused(idx) => idx + 1,
+                let next_idx = match self.app_state_container.play_state.get_now_playing_idx() {
+                    Some(idx) => idx + 1,
                     _ => break 'b1,
                 };
 
@@ -660,11 +660,17 @@ impl App {
                 }
             }
             KeyEvent {
-                code: KeyCode::Char(' '),
+                code: KeyCode::Char(' ') | KeyCode::Char('　'),
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::NONE,
                 ..
             } => Self::toggle_play_pause(&mut self.app_state_container),
+            KeyEvent {
+                code: KeyCode::Char(' ') | KeyCode::Char('　'),
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Self::stop_player(&mut self.app_state_container),
             KeyEvent {
                 code: KeyCode::Char('o'),
                 kind: KeyEventKind::Press,
@@ -726,8 +732,7 @@ impl App {
     }
 
     pub fn play_previous(app_state_container: &mut AppStateContainer) {
-        let (PlayState::Playing(idx) | PlayState::Paused(idx)) = app_state_container.play_state
-        else {
+        let Some(idx) = app_state_container.play_state.get_now_playing_idx() else {
             return;
         };
         if idx == 0 {
@@ -736,8 +741,7 @@ impl App {
         Self::play_track(app_state_container, idx - 1);
     }
     pub fn play_next(app_state_container: &mut AppStateContainer) {
-        let (PlayState::Playing(idx) | PlayState::Paused(idx)) = app_state_container.play_state
-        else {
+        let Some(idx) = app_state_container.play_state.get_now_playing_idx() else {
             return;
         };
         Self::play_track(app_state_container, idx + 1);
@@ -866,6 +870,17 @@ impl App {
             target_duration: reqest_pos,
             seek_no: new_seek_no,
         }));
+    }
+
+    pub fn stop_player(app_state_container: &mut AppStateContainer) {
+        let Some(PlayerThread {
+            ref player_control_singnal_sender,
+            ..
+        }) = app_state_container.player_thread
+        else {
+            return;
+        };
+        _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
     }
 
     pub fn add_new_files(app_state_container: &mut AppStateContainer) {

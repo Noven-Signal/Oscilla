@@ -13,6 +13,7 @@ use crate::app_state::app_state::AppStateContainer;
 pub struct Button<'a> {
     label: Line<'a>,
     state: ButtonState,
+    enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,26 +24,28 @@ pub enum ButtonState {
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub enum ButtonIdent {
-    PlayOrPause(PlayButtonState),
+    PlayOrPauseOrResume(PlayButtonState),
     Prev,
     Next,
+    Stop,
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum PlayButtonState {
     Playing,
     Paused,
-    Stopped
+    Stopped,
 }
 
 impl ButtonIdent {
-    const fn get_disp_name(&self) -> &'static str {
+    pub const fn get_disp_name(&self) -> &'static str {
         match self {
-            ButtonIdent::PlayOrPause(PlayButtonState::Playing) => "Pause",
-            ButtonIdent::PlayOrPause(PlayButtonState::Paused) => "Resume",
-            ButtonIdent::PlayOrPause(PlayButtonState::Stopped) => "Pause",
-            ButtonIdent::Prev => "prev",
-            ButtonIdent::Next => "next",
+            ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Playing) => "|| Pause",
+            ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Paused) => "||> Resume",
+            ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Stopped) => "| > Play",
+            ButtonIdent::Prev => "< prev",
+            ButtonIdent::Next => "next >",
+            ButtonIdent::Stop => "■ Stop",
         }
     }
 
@@ -54,20 +57,25 @@ impl ButtonIdent {
         use ButtonIdent::*;
         use KeyCode::*;
         match self {
-            PlayOrPause(_) => match key_code {
+            PlayOrPauseOrResume(_) => match key_code {
                 Left => None,
                 Right => Some(Prev),
                 _ => None,
             },
             Prev => match key_code {
-                KeyCode::Left => Some(Self::PlayOrPause(
+                Left => Some(Self::PlayOrPauseOrResume(
                     app_state_container.play_state.to_play_button_state(),
                 )),
-                KeyCode::Right => Some(Next),
+                Right => Some(Next),
                 _ => None,
             },
             Next => match key_code {
                 Left => Some(Prev),
+                Right => Some(Stop),
+                _ => None,
+            },
+            Stop => match key_code {
+                Left => Some(Next),
                 Right => None,
                 _ => None,
             },
@@ -76,20 +84,24 @@ impl ButtonIdent {
 }
 
 impl<'a> Button<'a> {
-    pub fn new(ident: ButtonIdent, state: ButtonState) -> Self {
+    pub fn new(ident: ButtonIdent, state: ButtonState, enabled: bool) -> Self {
         Button {
             label: ident.get_disp_name().into(),
             state: state,
+            enabled,
         }
     }
 }
 
 impl StatefulWidget for Button<'_> {
     type State = AppStateContainer;
+
     fn render(self, area: Rect, buf: &mut Buffer, _state: &mut Self::State) {
-        let (background_color, text_color) = match &self.state {
-            ButtonState::Normal => (Color::Rgb(0, 100, 0), Color::White),
-            ButtonState::Focused => (Color::Magenta, Color::White),
+        let (background_color, text_color) = match (&self.state, self.enabled) {
+            (ButtonState::Normal, true) => (Color::Rgb(0, 100, 0), Color::White),
+            (ButtonState::Normal, false) => (Color::Rgb(68, 83, 64), Color::White),
+            (ButtonState::Focused, true) => (Color::Magenta, Color::White),
+            (ButtonState::Focused, false) => (Color::Rgb(174, 140, 179), Color::White),
         };
 
         Line::from(self.label)

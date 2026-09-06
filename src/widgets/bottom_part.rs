@@ -32,7 +32,7 @@ impl StatefulWidget for BottomPart {
             &Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([
-                    Constraint::Length(50),
+                    Constraint::Length(65),
                     Constraint::Fill(1),
                     Constraint::Length(20),
                 ]),

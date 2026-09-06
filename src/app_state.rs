@@ -7,8 +7,8 @@ pub mod app_state {
     use crate::get_area_handler_fn;
     use crossterm::event::KeyCode;
     use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::text::Line;
+    use ratatui::layout::Rect;
+    use ratatui::text::Line;
     use ratatui::widgets::{ListState, Widget};
     use std::fmt::Debug;
     use std::pin::Pin;
@@ -29,15 +29,24 @@ use ratatui::text::Line;
         fn get_tab_selected_handler(_app_state_container: &mut AppStateContainer) {}
         fn lost_tab_selection_handler(_app_state_container: &mut AppStateContainer) {}
 
-        fn get_disp_bottom_line_text_area_selected<'a>(_app_state_container: &mut AppStateContainer, _available_width:usize) -> Line<'a>{
+        fn get_disp_bottom_line_text_area_selected<'a>(
+            _app_state_container: &mut AppStateContainer,
+            _available_width: usize,
+        ) -> Line<'a> {
             Line::default()
         }
 
-        fn render_bottom_line_text_area_selected(buf: &mut Buffer,area: Rect,app_state_container: &mut AppStateContainer){
-            let line = Self::get_disp_bottom_line_text_area_selected(app_state_container, area.width.into());
+        fn render_bottom_line_text_area_selected(
+            buf: &mut Buffer,
+            area: Rect,
+            app_state_container: &mut AppStateContainer,
+        ) {
+            let line = Self::get_disp_bottom_line_text_area_selected(
+                app_state_container,
+                area.width.into(),
+            );
             line.render(area, buf);
         }
-        
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -209,6 +218,13 @@ use ratatui::text::Line;
                 PlayState::Stopped => PlayButtonState::Stopped,
             }
         }
+
+        pub const fn get_now_playing_idx(&self) -> Option<usize> {
+            match self {
+                PlayState::Playing(idx) | PlayState::Paused(idx) => Some(*idx),
+                PlayState::Stopped => None,
+            }
+        }
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -304,7 +320,7 @@ use ratatui::text::Line;
 
             Self {
                 focus_state: TabState::None,
-                button_focus_state: ButtonIdent::PlayOrPause(PlayButtonState::Playing),
+                button_focus_state: ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Playing),
                 play_list,
                 vol_state: 100,
                 play_list_selected: ListState::default(),

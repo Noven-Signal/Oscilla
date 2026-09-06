@@ -37,8 +37,14 @@ impl<'a> KeyGuide<'a> {
 
     pub fn get_global_gudies(app_state_container: &AppStateContainer) -> Vec<KeyGuide<'static>> {
         let space_guide = match app_state_container.play_state {
-            PlayState::Playing(_) => vec![KeyGuide::new_gray("Space", "Pause")],
-            PlayState::Paused(_) => vec![KeyGuide::new_gray("Space", "Resume")],
+            PlayState::Playing(_) => vec![
+                KeyGuide::new_gray("Space", "Pause"),
+                KeyGuide::new_gray("Ctrl+Space", "Stop"),
+            ],
+            PlayState::Paused(_) => vec![
+                KeyGuide::new_gray("Space", "Resume"),
+                KeyGuide::new_gray("Ctrl+Space", "Stop"),
+            ],
             PlayState::Stopped => vec![],
         };
 
@@ -59,8 +65,20 @@ pub trait LineExt {
         key_guides: impl Iterator<Item = KeyGuide<'a>>,
         available_width: usize,
     ) -> Line<'a>;
+
+    fn from_key_guide_optioanl<'a>(
+        key_guides: impl Iterator<Item = Option<KeyGuide<'a>>>,
+        available_width: usize,
+    ) -> Line<'a>;
 }
 impl LineExt for Line<'_> {
+    fn from_key_guide_optioanl<'a>(
+        key_guides: impl Iterator<Item = Option<KeyGuide<'a>>>,
+        available_width: usize,
+    ) -> Line<'a> {
+        Self::from_key_guide(key_guides.flat_map(|x| x), available_width)
+    }
+
     fn from_key_guide<'a>(
         key_guides: impl Iterator<Item = KeyGuide<'a>>,
         available_width: usize,
@@ -86,12 +104,6 @@ impl LineExt for Line<'_> {
             }
         }
 
-        // let spans_separated_by_space = lines.enumerate().flat_map(|(index, line)| {
-        //     let separator = (index > 0).then(|| Span::raw("   "));
-        //     separator.into_iter().chain(line.spans)
-        // });
-
-        // Line::from_iter(spans_separated_by_space)
         final_line
     }
 }

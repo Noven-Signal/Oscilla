@@ -151,16 +151,8 @@ impl AreaHandler for ListArea {
         );
 
         let now_selected_item_is_now_playing = {
-            let now_playing_idx = {
-                match app_state_container.play_state {
-                    PlayState::Playing(idx) | PlayState::Paused(idx) => Some(idx),
-                    PlayState::Stopped => None,
-                }
-            };
-            let selected_idx = app_state_container.play_list_selected.selected();
-            
-            if let Some(now_playing_idx) = now_playing_idx
-                && let Some(selected_idx) = selected_idx
+            if let Some(now_playing_idx) = app_state_container.play_state.get_now_playing_idx()
+                && let Some(selected_idx) = app_state_container.play_list_selected.selected()
             {
                 now_playing_idx == selected_idx
             } else {

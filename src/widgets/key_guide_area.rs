@@ -3,7 +3,7 @@ use std::cmp;
 
 use ratatui::prelude::*;
 
-use crate::app_state::app_state::{AppStateContainer, PlayState, TabState};
+use crate::app_state::app_state::{AppStateContainer, TabState};
 
 use crate::get_area_handler_fn;
 use crate::key_guide::{KeyGuide, LineExt};
@@ -32,8 +32,8 @@ impl StatefulWidget for KeyGuideArea {
                 render_bottom_line_text_area_selected(buf, area, state);
             }
             TabState::None => {
-                let now_playing_text = match state.play_state {
-                    PlayState::Playing(idx) | PlayState::Paused(idx) => {
+                let now_playing_text = match state.play_state.get_now_playing_idx() {
+                    Some(idx) => {
                         match state.play_list.get(idx) {
                             Some(audio_file_info) => {
                                 let disp_name = audio_file_info.get_disp_name().to_string();
@@ -42,7 +42,7 @@ impl StatefulWidget for KeyGuideArea {
                             None => Line::default(),
                         }
                     }
-                    PlayState::Stopped => Line::default(),
+                    None => Line::default(),
                 };
 
                 let min_now_playing_width = cmp::min(
