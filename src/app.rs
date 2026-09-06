@@ -216,7 +216,8 @@ impl App {
 
         let mut ve_switcher_requst_signal: Option<VeSwitcherRequestSignal> = None;
         let mut ve_switcher_sync_signal: Option<VeSwitcherSyncSignal> = None;
-
+        let mut prev_ve_switcher_requst = VeSelectedTab::Off;
+        let mut ve_switcher_request_recv_buf = Vec::new();
         'l1: loop {
             if self.event_loop_canceled {
                 break 'l1;
@@ -279,6 +280,7 @@ impl App {
 
                     ve_switcher_requst_signal = None;
                     ve_switcher_sync_signal = None;
+                    prev_ve_switcher_requst = VeSelectedTab::Off;
 
                     self.app_state_container.player_request_state = None;
 
@@ -342,14 +344,20 @@ impl App {
                 signal = async {
                     match ve_switcher_requst_signal{
                         Some(_) =>  future::pending().await,
-                        None =>  self.app_state_container.ve_switcher_request_signal_recv.recv().await,
-                    }
+                        None =>  {
+                            self.app_state_container.ve_switcher_request_signal_recv.recv_many(&mut ve_switcher_request_recv_buf, 1000).await
+                        },
+                    };
+                    let last = ve_switcher_request_recv_buf.last().as_mut().and_then(|x| Some(**x));
+                    ve_switcher_request_recv_buf.clear();
+                    last
                 } => {
                     match signal{
-                        Some(signal) => {
+                        Some(signal) => if prev_ve_switcher_requst != signal.request_tab  {
                             ve_switcher_requst_signal = Some(signal);
+                            prev_ve_switcher_requst = signal.request_tab;
                         },
-                        None => {},
+                        _ => {},
                     }
                 },
                 signal = async {
