@@ -20,7 +20,7 @@ use crossterm::event::Event as CrosstermEvent;
 use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::{FutureExt, StreamExt, future};
 use ratatui::{prelude::Rect, widgets::StatefulWidget};
-use windows::Win32::Foundation::{ERROR_CANCELLED, HWND};
+use windows::Win32::Foundation::ERROR_CANCELLED;
 
 use windows::Win32::UI::Shell::{
     Common::COMDLG_FILTERSPEC, FOS_ALLOWMULTISELECT, FileOpenDialog, IFileOpenDialog,
@@ -927,6 +927,7 @@ impl App {
     fn select_multiple_files() -> windows::core::Result<Option<Vec<String>>> {
         use core::result::Result::*;
         use windows::{Win32::System::Com::*, core::*};
+        use windows::Win32::System::Console::GetConsoleWindow;
         let proc = || unsafe {
             let dialog: IFileOpenDialog =
                 CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
@@ -947,7 +948,7 @@ impl App {
             }];
             dialog.SetFileTypes(&filter_specs)?;
 
-            match dialog.Show(HWND::default()) {
+            match dialog.Show(GetConsoleWindow()) {
                 Ok(_) => {}
                 Err(e) if e.code() == HRESULT::from_win32(ERROR_CANCELLED.0) => {
                     return Ok(None);
