@@ -129,7 +129,7 @@ impl AreaHandler for ListArea {
     fn render_bottom_line_text_area_selected(
         buf: &mut Buffer,
         area: Rect,
-        app_state_container: &mut AppStateContainer
+        app_state_container: &mut AppStateContainer,
     ) {
         let audio_file_info = app_state_container
             .play_list_selected
@@ -137,9 +137,7 @@ impl AreaHandler for ListArea {
             .and_then(|idx| app_state_container.play_list.get(idx));
 
         let file_desc = match audio_file_info {
-            Some(x) => {
-                Span::raw("👉 ") + Span::from(x.get_disp_name().to_string())
-            }
+            Some(x) => Span::raw("👉 ") + Span::from(x.get_disp_name().to_string()),
             None => Line::default(),
         };
 
@@ -151,6 +149,24 @@ impl AreaHandler for ListArea {
                 .constraints([Constraint::Fill(1), Constraint::Max(min_selected_width)])
                 .spacing(1),
         );
+
+        let now_selected_item_is_now_playing = {
+            let now_playing_idx = {
+                match app_state_container.play_state {
+                    PlayState::Playing(idx) | PlayState::Paused(idx) => Some(idx),
+                    PlayState::Stopped => None,
+                }
+            };
+            let selected_idx = app_state_container.play_list_selected.selected();
+            
+            if let Some(now_playing_idx) = now_playing_idx
+                && let Some(selected_idx) = selected_idx
+            {
+                now_playing_idx == selected_idx
+            } else {
+                false
+            }
+        };
 
         let key_guides = Line::from_key_guide(
             [
@@ -164,12 +180,17 @@ impl AreaHandler for ListArea {
                 ),
             ]
             .into_iter()
+            .chain(match audio_file_info {
+                Some(_) if !now_selected_item_is_now_playing => {
+                    vec![KeyGuide::new_mazenta("Del", "Remove Selected Item")].into_iter()
+                }
+                _ => vec![].into_iter(),
+            })
             .chain(KeyGuide::GLOBAL_GUIDES),
-           keygides_area.width.into()
+            keygides_area.width.into(),
         );
 
         key_guides.render(keygides_area, buf);
         file_desc.render(selected_item_disp_area, buf);
-
     }
 }
