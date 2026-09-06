@@ -359,7 +359,7 @@ pub fn decode_loop(
             }
         }
 
-        let decoded = decoder_wrapper.decode();
+        let decoded = decoder_wrapper.decode(current_played_sample);
 
         let mut proc_f32 = |view: &[&[f32]]| -> Result<(), DecodeLoopError> {
             let fill_buff_within_block = |exclusive_buff: &mut [Vec<f32>; 2]| {
@@ -553,7 +553,7 @@ pub fn decode_loop(
             DecodeResult::Err(error) => {
                 return Err(DecodeLoopError::DecodeFailed(error.to_string()));
             }
-            DecodeResult::EndOfStream => {
+            DecodeResult::EndOfStream | DecodeResult::IoError => {
                 mem_copy_with_sample_rate_conversion(
                     &mut shared_buffer[write_exclusive],
                     &mut resample_container,

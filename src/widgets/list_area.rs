@@ -69,7 +69,7 @@ impl StatefulWidget for ListArea {
             Some(block) => block,
             None => Block::bordered().border_style(Style::new().fg(Color::White)),
         };
-        block.title("song list").render(area, buf);
+        block.title("playlist").render(area, buf);
         StatefulWidget::render(list, area.margin(None), buf, &mut state.play_list_selected);
     }
 }

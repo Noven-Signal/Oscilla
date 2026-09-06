@@ -13,8 +13,6 @@ use symphonia::core::probe::{Hint, ProbeResult};
 use symphonia::core::units::Time;
 use symphonia::default::get_probe;
 
-
-
 #[derive(Debug)]
 pub enum DecodeInitError {
     FileOpenFailed,
@@ -38,11 +36,12 @@ pub struct DecoderWrapper {
     probe_result: ProbeResult,
     decoder: Box<dyn Decoder>,
     track_id: u32,
+    n_frames: Option<u64>,
 }
 pub enum DecodeResult<'a> {
     Buf(AudioBufferRef<'a>),
     Err(symphonia::core::errors::Error),
-
+    IoError,
     EndOfStream,
     None,
 }
@@ -82,24 +81,33 @@ impl DecoderWrapper {
             .default_track()
             .ok_or_else(|| DecodeInitError::NoTrackFound)?;
 
+        let n_frames = track.codec_params.n_frames;
+
         let decoder: Box<dyn Decoder> = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions { verify: true })
             .map_err(|_| DecodeInitError::FileOpenFailed)?;
 
         let track_id = track.id;
+
         Ok(Self {
             probe_result,
             decoder,
             track_id,
+            n_frames,
         })
     }
 
-    pub fn decode(&'_ mut self) -> DecodeResult<'_> {
+    pub fn decode(&mut self, current_played_sample: u64) -> DecodeResult<'_> {
+        self.n_frames.unwrap();
+        if let Some(n_frames) = self.n_frames
+            && current_played_sample >= n_frames
+        {
+            return DecodeResult::EndOfStream;
+        }
         let packet = match self.probe_result.format.next_packet() {
             Ok(p) => p,
             Err(symphonia::core::errors::Error::IoError(_)) => {
-                //temp EndOfStream
-                return DecodeResult::EndOfStream;
+                return DecodeResult::IoError;
             }
             Err(err) => return DecodeResult::Err(err),
         };
