@@ -664,9 +664,7 @@ impl App {
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => {
-                // TODO: play/pause
-            }
+            } => Self::toggle_play_pause(&mut self.app_state_container),
             KeyEvent {
                 code: KeyCode::Char('o'),
                 kind: KeyEventKind::Press,
@@ -762,6 +760,54 @@ impl App {
                 .app_control_signal_sender
                 .send(AppContorlSignal::StartPlayer(idx));
         };
+    }
+
+    pub fn pause(app_state_container: &mut AppStateContainer) {
+        let Some(PlayerThread {
+            player_control_singnal_sender,
+            ..
+        }) = &mut app_state_container.player_thread
+        else {
+            return;
+        };
+
+        let play_state = &mut app_state_container.play_state;
+
+        use crate::app_state::app_state::*;
+        *play_state = match play_state {
+            PlayState::Playing(idx) => PlayState::Paused(*idx),
+            _ => return,
+        };
+
+        _ = player_control_singnal_sender.send(PlayerControlSignal::Pause);
+    }
+
+    pub fn resume(app_state_container: &mut AppStateContainer) {
+        let Some(PlayerThread {
+            player_control_singnal_sender,
+            ..
+        }) = &mut app_state_container.player_thread
+        else {
+            return;
+        };
+
+        let play_state = &mut app_state_container.play_state;
+
+        use crate::app_state::app_state::*;
+        *play_state = match play_state {
+            PlayState::Paused(idx) => PlayState::Playing(*idx),
+            _ => return,
+        };
+
+        _ = player_control_singnal_sender.send(PlayerControlSignal::Resume);
+    }
+
+    pub fn toggle_play_pause(app_state_container: &mut AppStateContainer) {
+        match app_state_container.play_state {
+            PlayState::Playing(_) => Self::pause(app_state_container),
+            PlayState::Paused(_) => Self::resume(app_state_container),
+            PlayState::Stopped => {}
+        }
     }
 
     pub fn seek_prev(app_state_container: &mut AppStateContainer, move_amout: Duration) {

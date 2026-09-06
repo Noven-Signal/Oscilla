@@ -39,8 +39,8 @@ impl ButtonIdent {
     const fn get_disp_name(&self) -> &'static str {
         match self {
             ButtonIdent::PlayOrPause(PlayButtonState::Playing) => "Pause",
-            ButtonIdent::PlayOrPause(PlayButtonState::Paused) => "Play",
-            ButtonIdent::PlayOrPause(PlayButtonState::Stopped) => "Play",
+            ButtonIdent::PlayOrPause(PlayButtonState::Paused) => "Resume",
+            ButtonIdent::PlayOrPause(PlayButtonState::Stopped) => "Pause",
             ButtonIdent::Prev => "prev",
             ButtonIdent::Next => "next",
         }

@@ -22,7 +22,7 @@ impl StatefulWidget for KeyGuideArea {
                     KeyGuide::new_mazenta("↑/↓/→/←", "Move"),
                 ]
                 .into_iter()
-                .chain(KeyGuide::GLOBAL_GUIDES),
+                .chain(KeyGuide::get_global_gudies(state)),
                 buf.area.width as usize,
             )
             .render(area, buf),
@@ -59,7 +59,7 @@ impl StatefulWidget for KeyGuideArea {
                 let key_guides = Line::from_key_guide(
                     [KeyGuide::new_mazenta("↑/↓/→/←", "Move Focus")]
                         .into_iter()
-                        .chain(KeyGuide::GLOBAL_GUIDES.into_iter()),
+                        .chain(KeyGuide::get_global_gudies(state)),
                     keygides_area.width as usize,
                 );
 

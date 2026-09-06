@@ -3,6 +3,8 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::app_state::app_state::{AppStateContainer, PlayState};
+
 #[derive(Clone, Copy)]
 pub struct KeyGuide<'a> {
     pub key: &'a str,
@@ -33,7 +35,20 @@ impl<'a> KeyGuide<'a> {
         color: Color::Magenta,
     };
 
-    pub const GLOBAL_GUIDES: [KeyGuide<'static>; 2] = [
+    pub fn get_global_gudies(app_state_container: &AppStateContainer) -> Vec<KeyGuide<'static>> {
+        let space_guide = match app_state_container.play_state {
+            PlayState::Playing(_) => vec![KeyGuide::new_gray("Space", "Pause")],
+            PlayState::Paused(_) => vec![KeyGuide::new_gray("Space", "Resume")],
+            PlayState::Stopped => vec![],
+        };
+
+        space_guide
+            .into_iter()
+            .chain(KeyGuide::GLOBAL_GUIDES)
+            .collect()
+    }
+
+    const GLOBAL_GUIDES: [KeyGuide<'static>; 2] = [
         KeyGuide::new_gray("Ctrl+O", "Open files"),
         KeyGuide::new_gray("Ctrl+D", "Quit Oscilla"),
     ];

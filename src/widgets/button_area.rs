@@ -2,7 +2,7 @@ use crate::app::App;
 use crate::extensions::rect::RectExtension;
 use crate::get_decorated_border;
 use crate::key_guide::{KeyGuide, LineExt};
-use crate::manipulation::PlayerControlSignal;
+
 use crate::widgets::button::ButtonState;
 
 use crossterm::event::KeyCode;
@@ -10,7 +10,7 @@ use ratatui::prelude::*;
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 use crate::app_state::app_state::{
-    AppStateContainer, AreaHandler, PlayState, PlayerThread, TabState, Tabs,
+    AppStateContainer, AreaHandler, TabState, Tabs,
 };
 
 use crate::widgets::button::{Button, ButtonIdent};
@@ -83,30 +83,8 @@ impl AreaHandler for ButtonsArea {
         }
 
         match focused_button_ident {
-            ButtonIdent::PlayOrPause(_) => 'play_arm: {
-                let Some(PlayerThread {
-                    player_control_singnal_sender: sender,
-                    ..
-                }) = &mut app_state_container.player_thread
-                else {
-                    break 'play_arm;
-                };
-
-                let play_state = &mut app_state_container.play_state;
-                let player_control_signal = match play_state {
-                    PlayState::Playing(_) => PlayerControlSignal::Pause,
-                    PlayState::Paused(_) => PlayerControlSignal::Resume,
-                    _ => panic!(),
-                };
-
-                _ = sender.send(player_control_signal);
-
-                use crate::app_state::app_state::PlayState::*;
-                *play_state = match play_state {
-                    Playing(idx) => Paused(*idx),
-                    Paused(idx) => Playing(*idx),
-                    Stopped => todo!(),
-                };
+            ButtonIdent::PlayOrPause(_) => {
+               App::toggle_play_pause(app_state_container);
             }
             ButtonIdent::Prev => App::play_previous(app_state_container),
             ButtonIdent::Next => App::play_next(app_state_container),
@@ -135,7 +113,9 @@ impl AreaHandler for ButtonsArea {
             ],
         };
         Line::from_key_guide(
-            key_guides.into_iter().chain(KeyGuide::GLOBAL_GUIDES.into_iter()),
+            key_guides
+                .into_iter()
+                .chain(KeyGuide::get_global_gudies(app_state_container)),
             available_width,
         )
     }

@@ -186,7 +186,7 @@ impl AreaHandler for ListArea {
                 }
                 _ => vec![].into_iter(),
             })
-            .chain(KeyGuide::GLOBAL_GUIDES),
+            .chain(KeyGuide::get_global_gudies(app_state_container)),
             keygides_area.width.into(),
         );
 

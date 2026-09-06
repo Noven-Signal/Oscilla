@@ -115,7 +115,7 @@ impl AreaHandler for DurationBarArea {
     }
 
     fn get_disp_bottom_line_text_area_selected<'a>(
-        _: &mut AppStateContainer,
+        app_state_container: &mut AppStateContainer,
         available_width: usize,
     ) -> Line<'a> {
         Line::from_key_guide(
@@ -126,7 +126,7 @@ impl AreaHandler for DurationBarArea {
                 KeyGuide::new_mazenta("0-9", "Go to [Number] / 10 position"),
             ]
             .into_iter()
-            .chain(KeyGuide::GLOBAL_GUIDES),
+            .chain(KeyGuide::get_global_gudies(app_state_container)),
             available_width,
         )
     }

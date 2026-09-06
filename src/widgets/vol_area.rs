@@ -60,7 +60,7 @@ impl AreaHandler for VolArea {
     }
 
     fn get_disp_bottom_line_text_area_selected<'a>(
-        _: &mut AppStateContainer,
+        app_state_container: &mut AppStateContainer,
         available_width: usize,
     ) -> Line<'a> {
         Line::from_key_guide(
@@ -70,7 +70,7 @@ impl AreaHandler for VolArea {
                 KeyGuide::new_mazenta("↓/←", "Volume down"),
             ]
             .into_iter()
-            .chain(KeyGuide::GLOBAL_GUIDES),
+            .chain(KeyGuide::get_global_gudies(app_state_container)),
             available_width,
         )
     }
