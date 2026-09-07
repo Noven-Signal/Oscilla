@@ -678,6 +678,18 @@ impl App {
                 ..
             } => Self::add_new_files(&mut self.app_state_container),
             KeyEvent {
+                code: KeyCode::Up,
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Self::move_vol(&mut self.app_state_container, 10),
+            KeyEvent {
+                code: KeyCode::Down,
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Self::move_vol(&mut self.app_state_container, -10),
+            KeyEvent {
                 code,
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::NONE,
@@ -883,6 +895,28 @@ impl App {
         _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
     }
 
+    pub fn move_vol(app_state_container: &mut AppStateContainer, move_quantity: i16) {
+        let after = app_state_container.vol_state as i16 + move_quantity;
+        let after = match after {
+            ..=0 => 0,
+            100.. => 100,
+            x => x,
+        };
+        Self::set_vol(app_state_container, after as u16);
+    }
+
+    pub fn set_vol(app_state_container: &mut AppStateContainer, set_vol: u16) {
+        app_state_container.vol_state = set_vol;
+
+        if let Some(PlayerThread {
+            ref player_control_singnal_sender,
+            ..
+        }) = app_state_container.player_thread
+        {
+            _ = player_control_singnal_sender.send(PlayerControlSignal::SetVol(set_vol));
+        };
+    }
+
     pub fn add_new_files(app_state_container: &mut AppStateContainer) {
         let app_control_signal_sender = app_state_container.app_control_signal_sender.clone();
         tokio::task::spawn_blocking(move || {
@@ -926,8 +960,8 @@ impl App {
 
     fn select_multiple_files() -> windows::core::Result<Option<Vec<String>>> {
         use core::result::Result::*;
-        use windows::{Win32::System::Com::*, core::*};
         use windows::Win32::System::Console::GetConsoleWindow;
+        use windows::{Win32::System::Com::*, core::*};
         let proc = || unsafe {
             let dialog: IFileOpenDialog =
                 CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;

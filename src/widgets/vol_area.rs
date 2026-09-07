@@ -1,3 +1,4 @@
+use crate::app::App;
 use crate::extensions::rect::RectExtension;
 use crate::get_decorated_border;
 use crate::key_guide::{KeyGuide, LineExt};
@@ -37,26 +38,15 @@ impl StatefulWidget for VolArea {
 }
 
 impl AreaHandler for VolArea {
-    fn handle_key(app_state_continer: &mut AppStateContainer, key_code: KeyCode) {
+    fn handle_key(app_state_container: &mut AppStateContainer, key_code: KeyCode) {
         let move_quantity: i16 = match key_code {
-            KeyCode::Up | KeyCode::Right => 1,
-            KeyCode::Down | KeyCode::Left => -1,
+            KeyCode::Up => 10,
+            KeyCode::Right => 1,
+            KeyCode::Down => -10,
+            KeyCode::Left => -1,
             _ => return,
         };
-        let after = app_state_continer.vol_state as i16 + move_quantity;
-        let after = match after {
-            ..=0 => 0,
-            100.. => 100,
-            x => x,
-        };
-        app_state_continer.vol_state = after as u16;
-        if let Some(PlayerThread {
-            player_control_singnal_sender,
-            ..
-        }) = &mut app_state_continer.player_thread
-        {
-            _ = player_control_singnal_sender.send(PlayerControlSignal::SetVol(after as u16));
-        }
+       App::move_vol(app_state_container, move_quantity);
     }
 
     fn get_disp_bottom_line_text_area_selected<'a>(
@@ -66,8 +56,10 @@ impl AreaHandler for VolArea {
         Line::from_key_guide(
             [
                 KeyGuide::ESC_DEFAULT,
-                KeyGuide::new_mazenta("↑/→", "Volume up"),
-                KeyGuide::new_mazenta("↓/←", "Volume down"),
+                KeyGuide::new_mazenta("↑", "Volume +10"),
+                KeyGuide::new_mazenta("↓", "Volume -10"),
+                KeyGuide::new_mazenta("→", "Volume +1"),
+                KeyGuide::new_mazenta("←", "Volume -1"),
             ]
             .into_iter()
             .chain(KeyGuide::get_global_gudies(app_state_container)),

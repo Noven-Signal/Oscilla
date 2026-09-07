@@ -43,8 +43,8 @@ impl ButtonIdent {
             ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Playing) => "❘❘ Pause",
             ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Paused) => "❘▷ Resume",
             ButtonIdent::PlayOrPauseOrResume(PlayButtonState::Stopped) => "▷ Play",
-            ButtonIdent::Prev => "⇦ prev",
-            ButtonIdent::Next => "next ⇨",
+            ButtonIdent::Prev => "⇦ Prev",
+            ButtonIdent::Next => "Next ⇨",
             ButtonIdent::Stop => "■ Stop",
         }
     }
