@@ -892,6 +892,7 @@ impl App {
         else {
             return;
         };
+        app_state_container.ve_channel = None;
         _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
     }
 
