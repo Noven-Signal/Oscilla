@@ -15,10 +15,10 @@
                 ]
             },
             "args": [
-                "C:\\dir_dev\\This game .mp3",
-                "C:\\dir_dev\\today.mp3",
-                "C:\\dir_dev\\taking my heart.mp3",
             ],
+            "env": {
+                "log_dir": "log"
+            },
             "initCommands": [
                 "breakpoint set --name core::panicking::panic_fmt",
                 "breakpoint set --name core::panicking::panic_nounwind_fmt"
