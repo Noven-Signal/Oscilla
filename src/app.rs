@@ -342,11 +342,11 @@ impl App {
                     }
                 },
                 signal = async {
-                    match ve_switcher_requst_signal{
-                        Some(_) =>  future::pending().await,
-                        None =>  {
+                    match (ve_switcher_requst_signal, &self.app_state_container.play_state){
+                        (None, PlayState::Playing(_)) =>  {
                             self.app_state_container.ve_switcher_request_signal_recv.recv_many(&mut ve_switcher_request_recv_buf, 1000).await
                         },
+                        _ =>  future::pending().await,
                     };
                     let last = ve_switcher_request_recv_buf.last().as_mut().and_then(|x| Some(**x));
                     ve_switcher_request_recv_buf.clear();
@@ -763,14 +763,9 @@ impl App {
         let Some(_) = app_state_container.play_list.get(idx) else {
             return;
         };
-        if let Some(PlayerThread {
-            player_control_singnal_sender,
-            ..
-        }) = &mut app_state_container.player_thread
-        {
-            app_state_container.ve_channel = None;
+        if app_state_container.player_thread.is_some() {
             app_state_container.wait_next_tack_idx = Some(idx);
-            _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
+            Self::stop_player(app_state_container);
         } else {
             _ = app_state_container
                 .app_control_signal_sender

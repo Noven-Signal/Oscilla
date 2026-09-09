@@ -78,6 +78,10 @@ impl StatefulWidget for EffectArea {
             return;
         };
 
+        if state.ve_selected != VeSelectedTab::Oscilloscope{
+            return;
+        }
+
         struct RenderChannelInfo<'a> {
             pub area: Rect,
             pub data: &'a [(f64, f64)],

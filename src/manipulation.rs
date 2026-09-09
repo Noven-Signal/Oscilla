@@ -231,7 +231,7 @@ pub type VESharedBuffer = [[OscilloscopeData; CHANNEL]; NUM_OF_BLOCK_VE];
 //pub const BLOCK_SIZE: usize = 1024 * 16; //147 * 160 * 4;
 pub const CHANNEL: usize = 2;
 pub const NUM_OF_BLOCK: usize = 16;
-pub const BACK_ROOM: usize = 4;
+pub const BACK_ROOM: usize = 1;
 pub const NUM_OF_BLOCK_VE: usize = 180;
 pub const AUDIO_OUTPUT_BUFFER_DURATION: Duration = Duration::from_millis(100);
 

@@ -245,7 +245,7 @@ pub fn decode_loop(
                 })) => {
                     let len = renderer_to_decoder_singal_recv.len();
 
-                    let ve_start_read_exclusize = (write_exclusive + len + 1) % NUM_OF_BLOCK;
+                    let ve_start_read_exclusive = (write_exclusive + len + 1) % NUM_OF_BLOCK;
                     for _ in 0..len {
                         _ = ve_to_decoder_signal_sender.send(VeToDecoderSyncSignal());
                     }
@@ -274,7 +274,7 @@ pub fn decode_loop(
                     _ = decoder_to_player_notification_signal.send(
                         WorkerToPlayerNotification::VeEnabledInfo(VeEnabledInfoFromDecoder {
                             audio_device_sample_rate: audio_device_sample_rate.raw_value(),
-                            ve_start_read_exclusize,
+                            ve_start_read_exclusize: ve_start_read_exclusive,
                             decorder_to_ve_signal_recv,
                             ve_to_decoder_signal_sender,
                             ve_buffer_duration_offset_sec,

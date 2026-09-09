@@ -83,15 +83,16 @@ impl AreaHandler for ListArea {
                 let Some(selected_idx) = app_state_container.play_list_selected.selected() else {
                     break 'b1;
                 };
-                match selected_idx {
-                    _x if app_state_container
-                        .play_list
-                        .last_index()
-                        .is_some_and(|playlist_last_idx| selected_idx <= playlist_last_idx) =>
-                    {
+
+                match app_state_container.play_list.last_index() {
+                    Some(playlist_last_idx) if (selected_idx <= playlist_last_idx) => {
                         App::play_track(app_state_container, selected_idx)
                     }
-                    _ => App::add_new_files(app_state_container),
+                    Some(playlist_last_idx) if selected_idx == playlist_last_idx + 1 => {
+                        App::add_new_files(app_state_container)
+                    }
+                    None => App::add_new_files(app_state_container),
+                    _ => {}
                 };
             }
             KeyCode::Delete => 'b1: {
@@ -159,17 +160,37 @@ impl AreaHandler for ListArea {
             false
         };
 
+        let available_arrow = match app_state_container.play_list_selected.selected() {
+            Some(selected) => match app_state_container.play_list.last_index() {
+                Some(last_idx) if selected == last_idx + 1 => Some("↑"),
+                Some(_) if selected == 0 => Some("↓"),
+                Some(_) => Some("↑/↓"),
+                None => None,
+            },
+            None => Some("↑/↓"),
+        };
+
         let key_guides = Line::from_key_guide(
             [
-                KeyGuide::ESC_DEFAULT,
-                KeyGuide::new_mazenta(
-                    "Enter",
-                    match audio_file_info {
-                        Some(_) => "Play Selected Item",
-                        None => "Open files",
-                    },
-                ),
+                Some(KeyGuide::ESC_DEFAULT),
+                available_arrow
+                    .and_then(|arrow| Some(KeyGuide::new_mazenta(arrow, "Move Selection"))),
+                audio_file_info
+                    .is_some()
+                    .then(|| KeyGuide::new_mazenta("Enter", "Play Selected Item")),
+                app_state_container
+                    .play_list_selected
+                    .selected()
+                    .is_some_and(
+                        |selected_idx| match app_state_container.play_list.last_index() {
+                            Some(last_idx) => last_idx + 1 == selected_idx,
+                            None => true,
+                        },
+                    )
+                    .then_some(KeyGuide::new_mazenta("Enter", "Open Files")),
             ]
+            .iter()
+            .flat_map(|x| *x)
             .into_iter()
             .chain(match audio_file_info {
                 Some(_) if !now_selected_item_is_now_playing => {
