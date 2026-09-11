@@ -45,7 +45,7 @@ impl AreaHandler for VolArea {
             KeyCode::Left => -1,
             _ => return,
         };
-       App::move_vol(app_state_container, move_quantity);
+        App::move_vol(app_state_container, move_quantity);
     }
 
     fn get_disp_bottom_line_text_area_selected<'a>(
@@ -55,10 +55,8 @@ impl AreaHandler for VolArea {
         Line::from_key_guide(
             [
                 KeyGuide::ESC_DEFAULT,
-                KeyGuide::new_mazenta("↑", "Volume +10"),
-                KeyGuide::new_mazenta("↓", "Volume -10"),
-                KeyGuide::new_mazenta("→", "Volume +1"),
-                KeyGuide::new_mazenta("←", "Volume -1"),
+                KeyGuide::new_mazenta("↑/↓", "Volume ±10"),
+                KeyGuide::new_mazenta("←/→", "Volume ±1"),
             ]
             .into_iter()
             .chain(KeyGuide::get_global_gudies(app_state_container)),

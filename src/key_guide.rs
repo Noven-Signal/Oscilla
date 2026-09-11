@@ -54,9 +54,8 @@ impl<'a> KeyGuide<'a> {
             .collect()
     }
 
-    const GLOBAL_GUIDES: [KeyGuide<'static>; 4] = [
-        KeyGuide::new_gray("Ctrl+↑", "Volume +10"),
-        KeyGuide::new_gray("Ctrl+↓", "Volume -10"),
+    const GLOBAL_GUIDES: [KeyGuide<'static>; 3] = [
+        KeyGuide::new_gray("Ctrl+↑/↓", "Volume ±10"),
         KeyGuide::new_gray("Ctrl+O", "Open files"),
         KeyGuide::new_gray("Ctrl+D", "Quit Oscilla"),
     ];
