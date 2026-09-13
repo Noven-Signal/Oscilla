@@ -121,8 +121,7 @@ impl AreaHandler for DurationBarArea {
         Line::from_key_guide(
             [
                 KeyGuide::ESC_DEFAULT,
-                KeyGuide::new_mazenta("←", "Rewind 5sec"),
-                KeyGuide::new_mazenta("→", "Fast forward 5sec"),
+                KeyGuide::new_mazenta("←/→", "Rewind/forward 5sec"),
                 KeyGuide::new_mazenta("0-9", "Go to [Number] / 10 position"),
             ]
             .into_iter()

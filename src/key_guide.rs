@@ -21,7 +21,7 @@ impl<'a> KeyGuide<'a> {
         }
     }
 
-    pub const fn new_gray(key: &'a str, desc: &'a str) -> Self {
+    pub const fn new_mazenta_gray(key: &'a str, desc: &'a str) -> Self {
         Self {
             key,
             desc,
@@ -38,12 +38,12 @@ impl<'a> KeyGuide<'a> {
     pub fn get_global_gudies(app_state_container: &AppStateContainer) -> Vec<KeyGuide<'static>> {
         let space_guide = match app_state_container.play_state {
             PlayState::Playing(_) => vec![
-                KeyGuide::new_gray("Space", "Pause"),
-                KeyGuide::new_gray("Ctrl+Space", "Stop"),
+                KeyGuide::new_mazenta_gray("Space", "Pause"),
+                KeyGuide::new_mazenta_gray("Ctrl+Space", "Stop"),
             ],
             PlayState::Paused(_) => vec![
-                KeyGuide::new_gray("Space", "Resume"),
-                KeyGuide::new_gray("Ctrl+Space", "Stop"),
+                KeyGuide::new_mazenta_gray("Space", "Resume"),
+                KeyGuide::new_mazenta_gray("Ctrl+Space", "Stop"),
             ],
             PlayState::Stopped => vec![],
         };
@@ -55,9 +55,9 @@ impl<'a> KeyGuide<'a> {
     }
 
     const GLOBAL_GUIDES: [KeyGuide<'static>; 3] = [
-        KeyGuide::new_gray("Ctrl+↑/↓", "Volume ±10"),
-        KeyGuide::new_gray("Ctrl+O", "Open files"),
-        KeyGuide::new_gray("Ctrl+D", "Quit Oscilla"),
+        KeyGuide::new_mazenta_gray("Ctrl+↑/↓", "Volume ±10"),
+        KeyGuide::new_mazenta_gray("Ctrl+O", "Open files"),
+        KeyGuide::new_mazenta_gray("Ctrl+D", "Quit Oscilla"),
     ];
 }
 
