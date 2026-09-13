@@ -10,7 +10,7 @@ use crate::{
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     prelude::{Buffer, Rect},
-    style::{Color, Style},
+    style::{Color, Style, Stylize},
     symbols::Marker,
     text::{Line, Span},
     widgets::{Axis, Chart, Dataset, GraphType, StatefulWidget, Tabs, Widget},
@@ -78,7 +78,7 @@ impl StatefulWidget for EffectArea {
             return;
         };
 
-        if state.ve_selected != VeSelectedTab::Oscilloscope{
+        if state.ve_selected != VeSelectedTab::Oscilloscope {
             return;
         }
 
@@ -97,7 +97,10 @@ impl StatefulWidget for EffectArea {
 
             let y_axis = Axis::default().bounds([-1.1, 1.1]);
 
-            let chart = Chart::new(vec![dataset]).x_axis(x_axis).y_axis(y_axis);
+            let chart = Chart::new(vec![dataset])
+                .x_axis(x_axis)
+                .y_axis(y_axis)
+                .bg(Color::Rgb(20, 20, 28));
 
             Widget::render(chart, render_channel_info.area, buf);
         };
@@ -154,9 +157,9 @@ impl AreaHandler for EffectArea {
             [
                 KeyGuide::ESC_DEFAULT,
                 KeyGuide::new_mazenta("←/→", "Select Visual Effect"),
-            ].into_iter()
-            .chain(KeyGuide::get_global_gudies(app_state_container))
-            ,
+            ]
+            .into_iter()
+            .chain(KeyGuide::get_global_gudies(app_state_container)),
             available_width,
         )
     }
