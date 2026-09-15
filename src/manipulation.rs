@@ -1,8 +1,13 @@
 use std::{
-    convert::TryFrom, fmt::{self, Debug, Display}, panic, pin::Pin, sync::{
+    convert::TryFrom,
+    fmt::{self, Debug, Display},
+    panic,
+    pin::Pin,
+    sync::{
         Arc, Condvar, Mutex,
         atomic::{AtomicPtr, AtomicU8, Ordering},
-    }, time::Duration,
+    },
+    time::Duration,
 };
 
 use tokio::{
@@ -534,7 +539,7 @@ pub async fn play_executor(
                     _ = decoder_control_signal_sender.send(DecoderControlSignal::VeDisabled);
                     _ = ve_control_signal_sender.send(VeControlSignal::VeDisabled);
                 }
-                PlayerControlSignal::Seek(signal) => {
+                PlayerControlSignal::Seek(signal) => 'arm1: {
                     struct SeekSignalForVeChannels {
                         pub decoder_to_ve_sync_signal_recv:
                             UnboundedReceiver<DecorderToVeSyncSignal>,
@@ -542,7 +547,7 @@ pub async fn play_executor(
                             UnboundedSender<VeToDecoderSyncSignal>,
                     }
                     let target_duration = signal.target_duration;
-                   
+
                     let sync_obj = Arc::new(SeekTimingSyncObj::new());
 
                     let (
@@ -606,6 +611,13 @@ pub async fn play_executor(
                         seek_no: signal.seek_no,
                     };
 
+                    if renderer_control_signal_sender
+                        .send(RendererControlSignal::Seek(seek_signal_for_renderer))
+                        .is_err()
+                    {
+                        break 'arm1;
+                    };
+
                     match seek_singal_for_ve_channels {
                         Some(SeekSignalForVeChannels {
                             decoder_to_ve_sync_signal_recv,
@@ -625,8 +637,6 @@ pub async fn play_executor(
 
                     _ = decoder_control_signal_sender
                         .send(DecoderControlSignal::Seek(seek_signal_for_decoder));
-                    _ = renderer_control_signal_sender
-                        .send(RendererControlSignal::Seek(seek_signal_for_renderer));
                 }
             };
         }

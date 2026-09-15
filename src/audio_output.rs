@@ -228,62 +228,68 @@ impl<'a> AudioOutput<'a> {
         'l1: loop {
             let get_block_len = |read_exclusive: usize| self.shared_buffer[read_exclusive][0].len();
 
-            'control_singal_loop: loop {
-                if self.control_signal_receiver.is_empty() && !*paused {
-                    break 'control_singal_loop;
-                }
-
-                let reciever = &mut self.control_signal_receiver;
-                match reciever.blocking_recv() {
-                    Some(RendererControlSignal::SetVol(set_vol)) => {
-                        self.current_vol = set_vol as f32 / 100f32;
-                        continue 'control_singal_loop;
-                    }
-                    Some(RendererControlSignal::Pause) => {
-                        self.audio_client.Stop()?;
-                        *paused = true;
-                        continue 'control_singal_loop;
-                    }
-                    Some(RendererControlSignal::Resume) => {
-                        self.audio_client.Start()?;
-                        *paused = false;
-                        continue 'control_singal_loop;
-                    }
-                    Some(RendererControlSignal::Stop) => {
-                        _ = self.audio_client.Stop();
-                        _ = signal_to_thread(
-                            &mut self.decoder_to_renderer_singal_recv,
-                            &mut self.renderer_to_decoder_singal_sender,
-                            &mut end_of_stream_block,
-                        );
-                        break 'l1;
-                    }
-                    Some(RendererControlSignal::Seek(SeekSignalForRenderer {
-                        sync_obj,
-                        renderer_to_decoder_sync_signal_sender,
-                        decoder_to_renderer_sync_signal_recv,
-                        seek_no,
-                        ..
-                    })) => {
-                        self.audio_client.Stop()?;
-                        self.audio_client.Reset()?;
-                        if !*paused {
-                            self.audio_client.Start()?;
+            macro_rules! control_loop_proc {
+                () => {
+                    'control_singal_loop: loop {
+                        if self.control_signal_receiver.is_empty() && !*paused {
+                            break 'control_singal_loop;
                         }
 
-                        self.renderer_to_decoder_singal_sender =
-                            renderer_to_decoder_sync_signal_sender;
-                        self.decoder_to_renderer_singal_recv = decoder_to_renderer_sync_signal_recv;
+                        match self.control_signal_receiver.blocking_recv() {
+                            Some(RendererControlSignal::SetVol(set_vol)) => {
+                                self.current_vol = set_vol as f32 / 100f32;
+                                continue 'control_singal_loop;
+                            }
+                            Some(RendererControlSignal::Pause) => {
+                                self.audio_client.Stop()?;
+                                *paused = true;
+                                continue 'control_singal_loop;
+                            }
+                            Some(RendererControlSignal::Resume) => {
+                                self.audio_client.Start()?;
+                                *paused = false;
+                                continue 'control_singal_loop;
+                            }
+                            Some(RendererControlSignal::Stop) => {
+                                _ = self.audio_client.Stop();
+                                _ = signal_to_thread(
+                                    &mut self.decoder_to_renderer_singal_recv,
+                                    &mut self.renderer_to_decoder_singal_sender,
+                                    &mut end_of_stream_block,
+                                );
+                                break 'l1;
+                            }
+                            Some(RendererControlSignal::Seek(SeekSignalForRenderer {
+                                sync_obj,
+                                renderer_to_decoder_sync_signal_sender,
+                                decoder_to_renderer_sync_signal_recv,
+                                seek_no,
+                                ..
+                            })) => {
+                                self.audio_client.Stop()?;
+                                self.audio_client.Reset()?;
+                                if !*paused {
+                                    self.audio_client.Start()?;
+                                }
 
-                        self.current_seek_no = seek_no;
+                                self.renderer_to_decoder_singal_sender =
+                                    renderer_to_decoder_sync_signal_sender;
+                                self.decoder_to_renderer_singal_recv =
+                                    decoder_to_renderer_sync_signal_recv;
 
-                        sync_obj.wait(1);
-                        //info!("renderer_seek_completed");
-                        return Ok(RenderLoopEndReason::Seek);
+                                self.current_seek_no = seek_no;
+
+                                sync_obj.wait(1);
+                                //info!("renderer_seek_completed");
+                                return Ok(RenderLoopEndReason::Seek);
+                            }
+                            _ => break 'l1,
+                        }
                     }
-                    _ => break 'l1,
-                }
+                };
             }
+
+            control_loop_proc!();
 
             Self::wait_for_wasapi_event(self.wasapi_event_hanle)?;
             //tokio::time::sleep(Duration::from_millis(10)).await;
@@ -386,7 +392,7 @@ impl<'a> AudioOutput<'a> {
                     filled_len,
                 }) if block_idx == read_exclusive => {
                     let min = cmp::min(available, filled_len);
-                    (min, head <= filled_len)
+                    (min, head >= filled_len)
                 }
                 _ => (available, false),
             };
@@ -404,6 +410,7 @@ impl<'a> AudioOutput<'a> {
 
             if this_iter_is_end_of_stream {
                 'l2: loop {
+                    control_loop_proc!();
                     Self::wait_for_wasapi_event(self.wasapi_event_hanle)?;
                     let padding = self.audio_client.GetCurrentPadding()?;
 
@@ -428,6 +435,23 @@ impl<'a> AudioOutput<'a> {
         _ = self
             .player_to_ui_singnal_sender
             .send(PlayerToUISingnal::RendererPlayCompleted);
+
+        self.control_signal_receiver.close();
+
+        //std::thread::sleep(Duration::from_millis(3000));
+
+        'l3: loop {
+            match self.control_signal_receiver.blocking_recv() {
+                Some(RendererControlSignal::Seek(signal)) => {
+                    self.renderer_to_decoder_singal_sender =
+                        signal.renderer_to_decoder_sync_signal_sender;
+                    self.decoder_to_renderer_singal_recv.close();
+                    signal.sync_obj.wait(1);
+                }
+                Some(_) => {}
+                None => break 'l3,
+            };
+        }
 
         Ok(RenderLoopEndReason::Stop)
     }
