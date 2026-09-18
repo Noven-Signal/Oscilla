@@ -15,6 +15,7 @@ use crate::{
     extensions::rect::RectExtension,
     get_decorated_border,
     key_guide::{KeyGuide, LineExt},
+    rgb_color,
 };
 
 #[derive(Default)]
@@ -67,19 +68,19 @@ impl StatefulWidget for DurationBarArea {
         }
 
         macro_rules! filled_color {
-            ($ident: ident) => {
-                Style::new().white().$ident().bold()
+            ($expr: expr) => {
+                Style::new().fg(rgb_color::WHITE).bg($expr).bold()
             };
         }
 
         let filled_style = match state.focus_state {
-            TabState::Selected(Tabs::DurationBarArea) => filled_color!(on_magenta),
-            _ => filled_color!(on_red),
+            TabState::Selected(Tabs::DurationBarArea) => filled_color!(rgb_color::MAGENTA),
+            _ => filled_color!(rgb_color::RED),
         };
 
         let duration_bar = LineGauge::default()
             .filled_style(filled_style)
-            .unfilled_style(Style::new().gray().on_black())
+            .unfilled_style(Style::new().gray().bg(rgb_color::BLACK))
             .label(label)
             .ratio(ratio)
             .filled_symbol(symbols::line::THICK_HORIZONTAL)

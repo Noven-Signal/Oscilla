@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::extensions::rect::RectExtension;
-use crate::get_decorated_border;
 use crate::key_guide::{KeyGuide, LineExt};
+use crate::{get_decorated_border, rgb_color};
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
 use ratatui::widgets::LineGauge;
@@ -24,8 +24,13 @@ impl StatefulWidget for VolArea {
         get_decorated_border!(state.focus_state, Tabs::VolArea).render(area, buf);
         let vol = state.vol_state;
         let volume_bar = LineGauge::default()
-            .filled_style(Style::new().white().on_magenta().bold())
-            .unfilled_style(Style::new().gray().on_black())
+            .filled_style(
+                Style::new()
+                    .fg(rgb_color::WHITE)
+                    .bg(rgb_color::MAGENTA)
+                    .bold(),
+            )
+            .unfilled_style(Style::new().fg(rgb_color::GRAY).bg(rgb_color::BLACK))
             .label("vol ")
             .ratio(state.vol_state as f64 / 100.0)
             .filled_symbol(symbols::line::HORIZONTAL)

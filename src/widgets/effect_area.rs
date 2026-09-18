@@ -11,7 +11,7 @@ use crate::{
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     prelude::{Buffer, Rect},
-    style::Style,
+    style::{Style, Stylize},
     symbols::Marker,
     text::{Line, Span},
     widgets::{Axis, Chart, Dataset, GraphType, StatefulWidget, Tabs, Widget},
@@ -38,7 +38,12 @@ impl StatefulWidget for EffectArea {
         });
 
         let tabs = Tabs::new(list)
-            .highlight_style(Style::default().magenta().on_black().bold())
+            .highlight_style(
+                Style::default()
+                    .fg(rgb_color::MAGENTA)
+                    .bg(rgb_color::BLACK)
+                    .bold(),
+            )
             .select(selected_idnex)
             .divider(Span::from("|").style(rgb_color::WHITE))
             .padding(" ", " ");
@@ -98,7 +103,10 @@ impl StatefulWidget for EffectArea {
 
             let y_axis = Axis::default().bounds([-1.1, 1.1]);
 
-            let chart = Chart::new(vec![dataset]).x_axis(x_axis).y_axis(y_axis);
+            let chart = Chart::new(vec![dataset])
+                .x_axis(x_axis)
+                .y_axis(y_axis)
+                .bg(rgb_color::WINDOWS_POWER_SHELL_DEFAULT);
 
             Widget::render(chart, render_channel_info.area, buf);
         };

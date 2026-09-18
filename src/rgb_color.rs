@@ -9,7 +9,7 @@ pub const YELLOW: Color = Color::Rgb(193, 156, 0);
 
 pub const WHITE: Color = Color::Rgb(255, 255, 255);
 
-
+pub const BLACK: Color = Color::Rgb(0, 0, 0);
 
 pub const BUTTON_NORMAL: Color = Color::Rgb(0, 100, 0);
 
@@ -21,5 +21,8 @@ pub const BUTTON_FORCUSED_DISABLED: Color = Color::Rgb(174, 140, 179);
 
 pub const AREA_FOCUSED: Color = Color::Rgb(180, 120, 120);
 
+pub const GRAY: Color = Color::Rgb(128, 128, 128);
 
 pub const DARK_GRAY: Color = Color::Rgb(118, 118, 118);
+
+pub const WINDOWS_POWER_SHELL_DEFAULT: Color = Color::Rgb(12, 12, 12);
