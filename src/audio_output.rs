@@ -3,6 +3,7 @@ use imp::CreateEventW;
 use std::cmp;
 use std::ptr::null;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tracing::debug;
 
 use windows::Win32::Foundation::{HANDLE, WAIT_EVENT};
 use windows::Win32::System::Threading::{INFINITE, WaitForSingleObject};
@@ -300,6 +301,19 @@ impl<'a> AudioOutput<'a> {
                 continue 'l1;
             }
             let available = cmp::min(os_available, get_block_len(read_exclusive));
+            let available = match end_of_stream_block {
+                Some(EndOfStreamBlockInfo {
+                    block_idx,
+                    filled_len,
+                }) if block_idx == read_exclusive => {
+                    debug!("filled_len: {filled_len}, head: {head}, available: {available}");
+                    cmp::min(filled_len - head, available)
+                }
+                _ => available,
+            };
+            if available == 0 {
+                break 'l1;
+            }
 
             let output_buffer = {
                 let ptr = self.render_client.GetBuffer(available as u32)?;
@@ -326,8 +340,18 @@ impl<'a> AudioOutput<'a> {
                     fill_buff_within_block();
                     head = head + available;
                 }
-                Equal => {
+                Equal => 'arm1: {
                     fill_buff_within_block();
+
+                    if let Some(EndOfStreamBlockInfo {
+                        block_idx,
+                        filled_len,
+                    }) = end_of_stream_block
+                        && block_idx == read_exclusive
+                    {
+                        head = filled_len;
+                        break 'arm1;
+                    }
 
                     signal_to_thread(
                         &mut self.decoder_to_renderer_singal_recv,
@@ -386,19 +410,7 @@ impl<'a> AudioOutput<'a> {
                 }
             };
 
-            let (actual_write_frames, this_iter_is_end_of_stream) = match end_of_stream_block {
-                Some(EndOfStreamBlockInfo {
-                    block_idx,
-                    filled_len,
-                }) if block_idx == read_exclusive => {
-                    let min = cmp::min(available, filled_len);
-                    (min, head >= filled_len)
-                }
-                _ => (available, false),
-            };
-
-            self.render_client
-                .ReleaseBuffer(actual_write_frames as u32, 0)?;
+            self.render_client.ReleaseBuffer(available as u32, 0)?;
 
             _ = self
                 .player_to_ui_singnal_sender
@@ -408,7 +420,25 @@ impl<'a> AudioOutput<'a> {
                     seek_no: self.current_seek_no,
                 }));
 
-            if this_iter_is_end_of_stream {
+            // if let Some(EndOfStreamBlockInfo {
+            //     block_idx,
+            //     filled_len,
+            // }) = end_of_stream_block
+            //     && block_idx == read_exclusive
+            // {
+            //     debug!(
+            //         "XXX head: {}, filled_len: {}, available: {}  XXX",
+            //         head, filled_len, available
+            //     );
+            // }
+
+            if let Some(EndOfStreamBlockInfo {
+                block_idx,
+                filled_len,
+            }) = end_of_stream_block
+                && block_idx == read_exclusive
+                && head >= filled_len
+            {
                 'l2: loop {
                     control_loop_proc!();
                     Self::wait_for_wasapi_event(self.wasapi_event_hanle)?;
@@ -452,6 +482,8 @@ impl<'a> AudioOutput<'a> {
                 None => break 'l3,
             };
         }
+
+        debug!("renderer_ exit");
 
         Ok(RenderLoopEndReason::Stop)
     }

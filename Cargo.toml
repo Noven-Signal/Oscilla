@@ -38,7 +38,7 @@ strum = { version = "0.26.3", features = ["derive"] }
 symphonia = { version = "0.5.5", features= ["all-formats", "all-codecs"] }
 tokio = { version = "1.40.0", features = ["full"] }
 tokio-util = "0.7.12"
-tracing = "0.1.40"
+tracing = { version = "0.1.40", features = ["release_max_level_info"] }
 tracing-error = "0.2.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "serde"] }
 urlencoding = "2.1.1"

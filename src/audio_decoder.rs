@@ -1,7 +1,5 @@
 use std::{
-    borrow::Cow,
-    fmt::{self, Display},
-    ops::AddAssign,
+    borrow::Cow, cmp, fmt::{self, Display}, ops::AddAssign,
 };
 
 use symphonia::core::{
@@ -10,6 +8,7 @@ use symphonia::core::{
     sample::{Sample, i24, u24},
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tracing::debug;
 
 use crate::{
     app::PlayerToUISingnal,
@@ -197,16 +196,16 @@ pub fn decode_loop(
             })
         };
 
-    let get_block_size_after_resampler = || match resample_container {
+    let block_size_after_resampler = match resample_container {
         Some(ref x) => x.block_size,
         None => BLOCK_SIZE_DEFAULT,
     };
 
     let mut type_conversion_buff: [Vec<f32>; CHANNEL] =
-        array_init(|| vec![0f32; get_block_size_after_resampler()]);
+        array_init(|| vec![0f32; block_size_after_resampler]);
 
     for i in 0..shared_buffer.len() {
-        shared_buffer[i] = array_init(|| vec![0f32; get_block_size_after_resampler()]);
+        shared_buffer[i] = array_init(|| vec![0f32; block_size_after_resampler]);
     }
 
     macro_rules! get_exclusizebuff {
@@ -554,10 +553,20 @@ pub fn decode_loop(
                 return Err(DecodeLoopError::DecodeFailed(error.to_string()));
             }
             DecodeResult::EndOfStream | DecodeResult::IoError => {
+                for ch in 0..CHANNEL {
+                    get_exclusizebuff!()[ch][head..].fill(0f32);
+                }
+
                 mem_copy_with_sample_rate_conversion(
                     &mut shared_buffer[write_exclusive],
                     &mut resample_container,
                 )?;
+
+                let filled_len =
+                    (audio_device_sample_rate.raw_value() * head) / (file_sample_rate.raw_value());
+                debug!("filled_len: {}", filled_len);
+                let block_len = shared_buffer[write_exclusive][0].len();
+                debug_assert!(filled_len <= block_len);
 
                 _ = singnal_to_thread(
                     &mut renderer_to_decoder_singal_recv,
@@ -565,7 +574,7 @@ pub fn decode_loop(
                     &mut ve_signal,
                     DecoderToRendererSyncSignal::EndOfStream(EndOfStreamSignal {
                         last_block: write_exclusive,
-                        filled_len: head,
+                        filled_len: cmp::min(filled_len, block_len),
                     }),
                 );
 
@@ -574,6 +583,7 @@ pub fn decode_loop(
                 _ = player_to_ui_singnal_sender.send(PlayerToUISingnal::EndOfStream);
 
                 end_of_stream_reached = true;
+                debug!("end of stream reached");
             }
             DecodeResult::None => continue,
         }

@@ -20,6 +20,7 @@ use crossterm::event::Event as CrosstermEvent;
 use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::{FutureExt, StreamExt, future};
 use ratatui::{prelude::Rect, widgets::StatefulWidget};
+use tracing::debug;
 use windows::Win32::Foundation::ERROR_CANCELLED;
 
 use windows::Win32::UI::Shell::{
@@ -226,6 +227,7 @@ impl App {
             enum VeProcResult {
                 SyncRange,
                 VeIsTooForward,
+                SignalNotRecievedYet,
             }
 
             let ve_proc = async |ves: &mut Ves, track_info: &PlayingTrackInfo| -> VeProcResult {
@@ -241,26 +243,31 @@ impl App {
                 let carib_played_duration = track_info.get_carib_duration().as_secs_f64();
 
                 let ve_position = (*ve_frame_count as f64 / 60f64) + *init_offset;
-
-                const N1_60_DOBULE: f64 = 2f64 / 60f64;
+                const N1_60: f64 = 1f64 / 60f64;
+                const N1_60_DOBULE: f64 = 2f64 * N1_60;
                 const M_N1_60_DOBULE: f64 = -N1_60_DOBULE;
                 match carib_played_duration - ve_position {
                     ..=M_N1_60_DOBULE => VeProcResult::VeIsTooForward,
-                    M_N1_60_DOBULE..=N1_60_DOBULE => {
-                        ve_to_ui_signal_recv.recv().await;
-                        VeProcResult::SyncRange
-                    }
+                    M_N1_60_DOBULE..=N1_60_DOBULE => match ve_to_ui_signal_recv.try_recv() {
+                        core::result::Result::Ok(_) => VeProcResult::SyncRange,
+                        Err(_) => VeProcResult::SignalNotRecievedYet,
+                    },
                     diff => {
-                        let num_of_frame_forward = (diff / N1_60_DOBULE).abs().floor() as u32;
+                        let num_of_frame_forward = (diff / N1_60).abs().floor() as u32;
                         for _ in 0..num_of_frame_forward - 1 {
                             //dbg!(i);
-                            ve_to_ui_signal_recv.recv().await;
+                            match ve_to_ui_signal_recv.try_recv() {
+                                core::result::Result::Ok(_) => {}
+                                Err(_) => return VeProcResult::SignalNotRecievedYet,
+                            };
                             Self::ve_sync(ve_read_exclusive).await;
                             _ = ui_to_ve_signal_sender.send(UiVEThreadSyncSignal());
                             *ve_frame_count = *ve_frame_count + 1;
                         }
-                        ve_to_ui_signal_recv.recv().await;
-                        VeProcResult::SyncRange
+                        match ve_to_ui_signal_recv.try_recv() {
+                            core::result::Result::Ok(_) => VeProcResult::SyncRange,
+                            Err(_) => VeProcResult::SignalNotRecievedYet,
+                        }
                     }
                 }
             };
@@ -475,6 +482,8 @@ impl App {
                     track_info.track_duration,
                 ));
 
+                debug!("track_duration: {}", track_info.track_duration.as_nanos());
+
                 let target_tab = self.app_state_container.ve_selected;
                 if target_tab != VeSelectedTab::Off {
                     _ = self
@@ -524,6 +533,8 @@ impl App {
                 let before_duration = track_info.get_carib_duration();
                 track_info.set_played_duration(frames, buffered_frames);
                 let after_duration = track_info.get_carib_duration();
+
+                debug!("played_frames: {}", after_duration.as_nanos());
 
                 if before_duration.as_secs() != after_duration.as_secs() {
                     self.render()?;
