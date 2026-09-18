@@ -101,7 +101,7 @@ The app currently accepts files with the following extensions:
 ### Build from source
 
 ```bash
-git clone https://github.com/<your-username>/Oscilla.git
+git clone https://github.com/Noven-Signal/Oscilla.git
 cd Oscilla
 cargo build --release
 ```
