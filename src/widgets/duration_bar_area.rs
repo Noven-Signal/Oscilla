@@ -80,7 +80,7 @@ impl StatefulWidget for DurationBarArea {
 
         let duration_bar = LineGauge::default()
             .filled_style(filled_style)
-            .unfilled_style(Style::new().gray().bg(rgb_color::BLACK))
+            .unfilled_style(Style::new().gray().bg(rgb_color::WINDOWS_POWER_SHELL_DEFAULT))
             .label(label)
             .ratio(ratio)
             .filled_symbol(symbols::line::THICK_HORIZONTAL)

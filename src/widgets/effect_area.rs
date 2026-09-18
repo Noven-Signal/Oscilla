@@ -41,7 +41,7 @@ impl StatefulWidget for EffectArea {
             .highlight_style(
                 Style::default()
                     .fg(rgb_color::MAGENTA)
-                    .bg(rgb_color::BLACK)
+                    .bg(rgb_color::WINDOWS_POWER_SHELL_DEFAULT)
                     .bold(),
             )
             .select(selected_idnex)
