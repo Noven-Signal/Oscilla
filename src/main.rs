@@ -25,6 +25,7 @@ mod utils;
 mod visual_effects;
 mod widgets;
 mod key_guide;
+mod rgb_color;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {

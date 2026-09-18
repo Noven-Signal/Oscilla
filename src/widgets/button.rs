@@ -2,11 +2,12 @@ use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{StatefulWidget, Widget};
 
 use crate::app_state::app_state::AppStateContainer;
+use crate::rgb_color;
 
 /// A custom widget that renders a button with a label, theme and state.
 #[derive(Debug, Clone)]
@@ -98,10 +99,12 @@ impl StatefulWidget for Button<'_> {
 
     fn render(self, area: Rect, buf: &mut Buffer, _state: &mut Self::State) {
         let (background_color, text_color) = match (&self.state, self.enabled) {
-            (ButtonState::Normal, true) => (Color::Rgb(0, 100, 0), Color::White),
-            (ButtonState::Normal, false) => (Color::Rgb(68, 83, 64), Color::White),
-            (ButtonState::Focused, true) => (Color::Magenta, Color::White),
-            (ButtonState::Focused, false) => (Color::Rgb(174, 140, 179), Color::White),
+            (ButtonState::Normal, true) => (rgb_color::BUTTON_NORMAL, rgb_color::WHITE),
+            (ButtonState::Normal, false) => (rgb_color::BUTTON_NORMAL_DISABLED, rgb_color::WHITE),
+            (ButtonState::Focused, true) => (rgb_color::BUTTON_FOCUSED, rgb_color::WHITE),
+            (ButtonState::Focused, false) => {
+                (rgb_color::BUTTON_FORCUSED_DISABLED, rgb_color::WHITE)
+            }
         };
 
         Line::from(self.label)

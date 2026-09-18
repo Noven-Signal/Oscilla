@@ -4,11 +4,12 @@ use crate::app::App;
 use crate::app_state::app_state::{AppStateContainer, AreaHandler, PlayState};
 use crate::extensions::rect::RectExtension;
 use crate::key_guide::{KeyGuide, LineExt};
+use crate::rgb_color;
 use crate::utils::VecExt;
 use crate::{app_state, get_decorated_border};
 use crossterm::event::KeyCode;
 use ratatui::prelude::*;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::{Block, HighlightSpacing, List, ListDirection, ListItem, Widget};
 
 #[derive(Default)]
@@ -28,12 +29,13 @@ impl StatefulWidget for ListArea {
             match state.play_state {
                 Playing(idx) | Paused(idx) if idx == i => ListItem::new(
                     Span::raw(format!("♬  {name}")).style(match is_selected_item {
-                        true => Color::Yellow,
-                        false => Color::Magenta,
+                        true => rgb_color::YELLOW,
+                        false => rgb_color::MAGENTA,
                     }),
                 ),
                 _ if is_selected_item => ListItem::new(
-                    Span::raw("> ").style(Color::Red) + Span::raw(name).style(Color::Yellow),
+                    Span::raw("> ").style(rgb_color::RED)
+                        + Span::raw(name).style(rgb_color::YELLOW),
                 ),
                 _ => ListItem::new(name),
             }
@@ -49,8 +51,8 @@ impl StatefulWidget for ListArea {
                 } =>
             {
                 add_list_base
-                    .style(Color::Red)
-                    .bg(Color::White)
+                    .style(rgb_color::RED)
+                    .bg(rgb_color::WHITE)
                     .into_centered_line()
             }
             _ => add_list_base.underlined().into_centered_line(),
@@ -59,7 +61,7 @@ impl StatefulWidget for ListArea {
         let items = items.chain([ListItem::new(add_list_item)]);
 
         let list = List::new(items)
-            .style(Color::White)
+            .style(rgb_color::WHITE)
             .highlight_spacing(HighlightSpacing::Never)
             .scroll_padding(1)
             .direction(ListDirection::TopToBottom)
@@ -67,7 +69,7 @@ impl StatefulWidget for ListArea {
 
         let block = match block {
             Some(block) => block,
-            None => Block::bordered().border_style(Style::new().fg(Color::White)),
+            None => Block::bordered().border_style(Style::new().fg(rgb_color::WHITE)),
         };
         block.title("playlist").render(area, buf);
         StatefulWidget::render(list, area.margin(None), buf, &mut state.play_list_selected);

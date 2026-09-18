@@ -3,7 +3,7 @@ use crate::widgets::bottom_part::BottomPart;
 use crate::widgets::popup::Popup;
 use crate::widgets::{effect_area::*, list_area::*};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Clear, Widget};
+use ratatui::widgets::{Clear, Widget};
 
 #[derive(Default, Clone, Copy)]
 pub struct AppRoot {}
@@ -11,10 +11,6 @@ pub struct AppRoot {}
 impl StatefulWidget for AppRoot {
     type State = AppStateContainer;
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut AppStateContainer) {
-        Block::default()
-            .bg(Color::Rgb(20, 20, 28))
-            .render(area, buf);
-
         let [top, bottom] = area.layout(
             &Layout::default()
                 .direction(Direction::Vertical)

@@ -3,7 +3,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::app_state::app_state::{AppStateContainer, PlayState};
+use crate::{app_state::app_state::{AppStateContainer, PlayState}, rgb_color};
 
 #[derive(Clone, Copy)]
 pub struct KeyGuide<'a> {
@@ -17,7 +17,7 @@ impl<'a> KeyGuide<'a> {
         Self {
             key,
             desc,
-            color: Color::Magenta,
+            color: rgb_color::MAGENTA,
         }
     }
 
@@ -25,14 +25,14 @@ impl<'a> KeyGuide<'a> {
         Self {
             key,
             desc,
-            color: Color::Rgb(88, 61, 92),
+            color: rgb_color::MAGENTA_GRAY,
         }
     }
 
     pub const ESC_DEFAULT: Self = KeyGuide {
         key: "Esc",
         desc: "Cancel",
-        color: Color::Magenta,
+        color: rgb_color::MAGENTA,
     };
 
     pub fn get_global_gudies(app_state_container: &AppStateContainer) -> Vec<KeyGuide<'static>> {

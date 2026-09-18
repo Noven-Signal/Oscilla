@@ -4,6 +4,7 @@ use ratatui::widgets::{Block, Paragraph, Widget, Wrap};
 
 use crate::app_state::app_state::AppStateContainer;
 use crate::app::PopupObject;
+use crate::rgb_color;
 
 #[derive(Default, Clone, Copy)]
 pub struct Popup {}
@@ -19,7 +20,7 @@ impl StatefulWidget for Popup {
         else {
             return;
         };
-        Block::new().bg(Color::Magenta).render(area, buf);
+        Block::new().bg(rgb_color::MAGENTA).render(area, buf);
 
         let [title_area, message_area, _, button_area, _] = area.layout(
             &Layout::default()
@@ -50,7 +51,7 @@ impl StatefulWidget for Popup {
             .render(message_area, buf);
         Line::from(button_name.as_str())
             .centered()
-            .bg(Color::DarkGray)
+            .bg(rgb_color::DARK_GRAY)
             .underlined()
             .render(button_area, buf);
     }

@@ -6,11 +6,12 @@ use crate::{
     extensions::rect::RectExtension,
     get_decorated_border,
     key_guide::{KeyGuide, LineExt},
+    rgb_color,
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     prelude::{Buffer, Rect},
-    style::{Color, Style, Stylize},
+    style::Style,
     symbols::Marker,
     text::{Line, Span},
     widgets::{Axis, Chart, Dataset, GraphType, StatefulWidget, Tabs, Widget},
@@ -32,14 +33,14 @@ impl StatefulWidget for EffectArea {
             if state.ve_selected == x {
                 x.nameof().into()
             } else {
-                Line::from(x.nameof()).style(Color::White)
+                Line::from(x.nameof()).style(rgb_color::WHITE)
             }
         });
 
         let tabs = Tabs::new(list)
             .highlight_style(Style::default().magenta().on_black().bold())
             .select(selected_idnex)
-            .divider(Span::from("|").style(Color::White))
+            .divider(Span::from("|").style(rgb_color::WHITE))
             .padding(" ", " ");
 
         tabs.render(area, buf);
@@ -90,17 +91,14 @@ impl StatefulWidget for EffectArea {
             let dataset = Dataset::default()
                 .marker(Marker::Braille)
                 .graph_type(GraphType::Line)
-                .style(Color::Yellow)
+                .style(rgb_color::YELLOW)
                 .data(render_channel_info.data);
 
             let x_axis = Axis::default().bounds([0.0, *sample_rate as f64 / 60f64]);
 
             let y_axis = Axis::default().bounds([-1.1, 1.1]);
 
-            let chart = Chart::new(vec![dataset])
-                .x_axis(x_axis)
-                .y_axis(y_axis)
-                .bg(Color::Rgb(20, 20, 28));
+            let chart = Chart::new(vec![dataset]).x_axis(x_axis).y_axis(y_axis);
 
             Widget::render(chart, render_channel_info.area, buf);
         };
