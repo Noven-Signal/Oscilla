@@ -41,7 +41,7 @@ impl StatefulWidget for EffectArea {
             .highlight_style(
                 Style::default()
                     .fg(rgb_color::MAGENTA)
-                    .bg(rgb_color::WINDOWS_POWER_SHELL_DEFAULT)
+                    .bg(rgb_color::WINDOWS_TERMINAL_DEFAULT)
                     .bold(),
             )
             .select(selected_idnex)
@@ -106,7 +106,7 @@ impl StatefulWidget for EffectArea {
             let chart = Chart::new(vec![dataset])
                 .x_axis(x_axis)
                 .y_axis(y_axis)
-                .bg(rgb_color::WINDOWS_POWER_SHELL_DEFAULT);
+                .bg(rgb_color::WINDOWS_TERMINAL_DEFAULT);
 
             Widget::render(chart, render_channel_info.area, buf);
         };

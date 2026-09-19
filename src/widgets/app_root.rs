@@ -13,7 +13,7 @@ impl StatefulWidget for AppRoot {
     type State = AppStateContainer;
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut AppStateContainer) {
         Block::default()
-            .bg(rgb_color::WINDOWS_POWER_SHELL_DEFAULT)
+            .bg(rgb_color::WINDOWS_TERMINAL_DEFAULT)
             .render(area, buf);
 
         let [top, bottom] = area.layout(

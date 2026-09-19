@@ -25,4 +25,4 @@ pub const GRAY: Color = Color::Rgb(128, 128, 128);
 
 pub const DARK_GRAY: Color = Color::Rgb(118, 118, 118);
 
-pub const WINDOWS_POWER_SHELL_DEFAULT: Color = Color::Rgb(12, 12, 12);
+pub const WINDOWS_TERMINAL_DEFAULT: Color = Color::Rgb(12, 12, 12);

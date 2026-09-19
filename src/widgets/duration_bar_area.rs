@@ -92,7 +92,7 @@ impl StatefulWidget for DurationBarArea {
             .unfilled_style(
                 Style::new()
                     .gray()
-                    .bg(rgb_color::WINDOWS_POWER_SHELL_DEFAULT),
+                    .bg(rgb_color::WINDOWS_TERMINAL_DEFAULT),
             )
             .label(label)
             .ratio(ratio)
