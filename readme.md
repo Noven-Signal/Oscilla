@@ -38,7 +38,7 @@ Oscilla is designed for local audio playback and smooth, high-quality visual eff
 
 ### Download a release
 
-Download the latest binary from the GitHub Releases page and run it directly:
+Download the latest binary from [the GitHub Releases page](https://github.com/Noven-Signal/Oscilla/releases) and run it directly:
 
 ```bash
 Oscilla.exe
