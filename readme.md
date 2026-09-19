@@ -54,6 +54,8 @@ Oscilla.exe path\to\song.mp3 path\to\album.flac
 
 - Space: Play or pause playback
 - Ctrl + Space: Stop
+- Ctrl + Left: Seek Rewind 5 sec
+- Ctrl + Right: Seek Forward 5 sec
 - Ctrl + Up: Volume +10
 - Ctrl + Down: Volume -10
 - Ctrl + O: Open files

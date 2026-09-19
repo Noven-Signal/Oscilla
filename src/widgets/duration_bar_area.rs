@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     prelude::{Buffer, Rect},
@@ -8,6 +6,7 @@ use ratatui::{
     text::{Line, Text},
     widgets::{LineGauge, StatefulWidget, Widget},
 };
+use std::{ops::Div, time::Duration};
 
 use crate::{
     app::App,
@@ -35,18 +34,28 @@ impl StatefulWidget for DurationBarArea {
 
         let (label, ratio, remaining_time_str);
         if let Some(track_info) = &state.playing_track_info {
+            enum RoundRule {
+                Floor,
+                Ceil,
+            }
             trait DurationExt {
-                fn format_to_min_sec(&self) -> String;
+                fn format_to_min_sec(&self, round_rule: RoundRule) -> String;
             }
             impl DurationExt for Duration {
-                fn format_to_min_sec(&self) -> String {
-                    let total_secs = self.as_secs();
-                    let min = total_secs / 60;
-                    let sec = total_secs % 60;
+                fn format_to_min_sec(&self, round_rule: RoundRule) -> String {
+                    let sec_f32 = self.as_secs_f32();
+                    let total_secs = match round_rule {
+                        RoundRule::Floor => sec_f32.floor(),
+                        RoundRule::Ceil => sec_f32.ceil(),
+                    } as u16;
+                    let min = total_secs.div(60);
+                    let sec = total_secs.saturating_sub(min * 60);
                     format!("{:02}:{:02}", min, sec)
                 }
             }
-            label = track_info.get_carib_duration().format_to_min_sec();
+            label = track_info
+                .get_carib_duration()
+                .format_to_min_sec(RoundRule::Floor);
             ratio = {
                 let current = track_info.get_carib_duration().as_secs_f64();
                 let total = track_info.track_duraion.as_secs_f64();
@@ -60,7 +69,7 @@ impl StatefulWidget for DurationBarArea {
             };
             remaining_time_str =
                 Duration::saturating_sub(track_info.track_duraion, track_info.get_carib_duration())
-                    .format_to_min_sec();
+                    .format_to_min_sec(RoundRule::Ceil);
         } else {
             label = "--".to_string();
             ratio = 0f64;
@@ -80,7 +89,11 @@ impl StatefulWidget for DurationBarArea {
 
         let duration_bar = LineGauge::default()
             .filled_style(filled_style)
-            .unfilled_style(Style::new().gray().bg(rgb_color::WINDOWS_POWER_SHELL_DEFAULT))
+            .unfilled_style(
+                Style::new()
+                    .gray()
+                    .bg(rgb_color::WINDOWS_POWER_SHELL_DEFAULT),
+            )
             .label(label)
             .ratio(ratio)
             .filled_symbol(symbols::line::THICK_HORIZONTAL)

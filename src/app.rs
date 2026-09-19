@@ -689,6 +689,18 @@ impl App {
                 ..
             } => Self::add_new_files(&mut self.app_state_container),
             KeyEvent {
+                code: KeyCode::Left,
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Self::seek_prev(&mut self.app_state_container, Duration::from_secs(5)),
+            KeyEvent {
+                code: KeyCode::Right,
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Self::seek_forward(&mut self.app_state_container, Duration::from_secs(5)),
+            KeyEvent {
                 code: KeyCode::Up,
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,

@@ -3,7 +3,10 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::{app_state::app_state::{AppStateContainer, PlayState}, rgb_color};
+use crate::{
+    app_state::app_state::{AppStateContainer, PlayState},
+    rgb_color,
+};
 
 #[derive(Clone, Copy)]
 pub struct KeyGuide<'a> {
@@ -40,10 +43,12 @@ impl<'a> KeyGuide<'a> {
             PlayState::Playing(_) => vec![
                 KeyGuide::new_mazenta_gray("Space", "Pause"),
                 KeyGuide::new_mazenta_gray("Ctrl+Space", "Stop"),
+                KeyGuide::new_mazenta_gray("Ctrl+←/→", "Rewind/forward 5sec"),
             ],
             PlayState::Paused(_) => vec![
                 KeyGuide::new_mazenta_gray("Space", "Resume"),
                 KeyGuide::new_mazenta_gray("Ctrl+Space", "Stop"),
+                KeyGuide::new_mazenta_gray("Ctrl+←/→", "Rewind/forward 5sec"),
             ],
             PlayState::Stopped => vec![],
         };
