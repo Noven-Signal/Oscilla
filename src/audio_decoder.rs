@@ -182,7 +182,7 @@ pub fn decode_loop(
                 R176400 | R192000 => 4,
             };
 
-            let decode_tmp_block = (base * multiple * 1000) as usize;
+            let decode_tmp_block = (base * multiple * 100) as usize;
 
             Some(ResampleContainer {
                 decode_tmp_block: array_init(|| vec![0f32; decode_tmp_block]),

@@ -789,7 +789,7 @@ impl App {
             return;
         };
         if app_state_container.player_thread.is_some() {
-            Self::stop_player(app_state_container,Some(idx));
+            Self::stop_player(app_state_container, Some(idx));
         } else {
             _ = app_state_container
                 .app_control_signal_sender
@@ -860,6 +860,10 @@ impl App {
             return;
         };
 
+        let Some(now_playing_idx) = app_state_container.play_state.get_now_playing_idx() else {
+            return;
+        };
+
         let carib_duration = if let Some(seeking_duration) = playing_track_info.seeking_duration {
             seeking_duration
         } else {
@@ -868,7 +872,15 @@ impl App {
 
         let reqest_pos = carib_duration + move_amout;
         if reqest_pos > playing_track_info.track_duraion {
-            Self::play_next(app_state_container);
+            if app_state_container
+                .play_list
+                .get(now_playing_idx + 1)
+                .is_some()
+            {
+                Self::play_next(app_state_container)
+            } else {
+                Self::stop_player(app_state_container, None);
+            }
             return;
         }
 
@@ -903,7 +915,10 @@ impl App {
         }));
     }
 
-    pub fn stop_player(app_state_container: &mut AppStateContainer,wait_next_tack_idx: Option<usize>) {
+    pub fn stop_player(
+        app_state_container: &mut AppStateContainer,
+        wait_next_tack_idx: Option<usize>,
+    ) {
         let Some(PlayerThread {
             ref player_control_singnal_sender,
             ..
