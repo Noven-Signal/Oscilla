@@ -586,6 +586,8 @@ impl App {
                 else {
                     break 'b1;
                 };
+
+                self.app_state_container.ve_channel = None;
                 _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
             }
             PlayerToUISingnal::SeekComplete(SeekCompleteSignal {
@@ -681,7 +683,7 @@ impl App {
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            } => Self::stop_player(&mut self.app_state_container),
+            } => Self::stop_player(&mut self.app_state_container, None),
             KeyEvent {
                 code: KeyCode::Char('o'),
                 kind: KeyEventKind::Press,
@@ -787,8 +789,7 @@ impl App {
             return;
         };
         if app_state_container.player_thread.is_some() {
-            app_state_container.wait_next_tack_idx = Some(idx);
-            Self::stop_player(app_state_container);
+            Self::stop_player(app_state_container,Some(idx));
         } else {
             _ = app_state_container
                 .app_control_signal_sender
@@ -902,7 +903,7 @@ impl App {
         }));
     }
 
-    pub fn stop_player(app_state_container: &mut AppStateContainer) {
+    pub fn stop_player(app_state_container: &mut AppStateContainer,wait_next_tack_idx: Option<usize>) {
         let Some(PlayerThread {
             ref player_control_singnal_sender,
             ..
@@ -910,6 +911,7 @@ impl App {
         else {
             return;
         };
+        app_state_container.wait_next_tack_idx = wait_next_tack_idx;
         app_state_container.ve_channel = None;
         _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
     }

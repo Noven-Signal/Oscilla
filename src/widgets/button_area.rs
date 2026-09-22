@@ -112,7 +112,7 @@ impl AreaHandler for ButtonsArea {
             },
             ButtonIdent::Prev => App::play_previous(app_state_container),
             ButtonIdent::Next => App::play_next(app_state_container),
-            ButtonIdent::Stop => App::stop_player(app_state_container),
+            ButtonIdent::Stop => App::stop_player(app_state_container, None),
         }
     }
 
