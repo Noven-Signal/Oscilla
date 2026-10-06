@@ -50,7 +50,7 @@ impl AreaHandler for VolArea {
             KeyCode::Left => -1,
             _ => return,
         };
-        App::move_vol(app_state_container, move_quantity);
+        _ = App::move_vol(app_state_container, move_quantity);
     }
 
     fn get_disp_bottom_line_text_area_selected<'a>(

@@ -88,12 +88,12 @@ impl AreaHandler for ListArea {
 
                 match app_state_container.play_list.last_index() {
                     Some(playlist_last_idx) if (selected_idx <= playlist_last_idx) => {
-                        App::play_track(app_state_container, selected_idx)
+                        _ = App::play_track(app_state_container, selected_idx)
                     }
                     Some(playlist_last_idx) if selected_idx == playlist_last_idx + 1 => {
-                        App::add_new_files(app_state_container)
+                        _ = App::add_new_files(app_state_container)
                     }
-                    None => App::add_new_files(app_state_container),
+                    None => _ = App::add_new_files(app_state_container),
                     _ => {}
                 };
             }

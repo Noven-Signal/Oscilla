@@ -106,13 +106,13 @@ impl AreaHandler for ButtonsArea {
                         .send(crate::app::AppContorlSignal::StartPlayer(0))
                 }
                 PlayState::Playing(_) | PlayState::Paused(_) => {
-                    App::toggle_play_pause(app_state_container)
+                    _ = App::toggle_play_pause(app_state_container)
                 }
                 _ => {}
             },
-            ButtonIdent::Prev => App::play_previous(app_state_container),
-            ButtonIdent::Next => App::play_next(app_state_container),
-            ButtonIdent::Stop => App::stop_player(app_state_container, None),
+            ButtonIdent::Prev => _ = App::play_previous(app_state_container),
+            ButtonIdent::Next => _ = App::play_next(app_state_container),
+            ButtonIdent::Stop => _ = App::stop_player(app_state_container, None),
         }
     }
 

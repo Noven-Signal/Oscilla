@@ -1,7 +1,7 @@
 use crate::{
-    app::Ves,
+    app::{App, Ves},
     app_state::app_state::{
-        AppStateContainer, AreaHandler, PlayingTrackInfo, VeSelectedTab, VeSwitcherRequestSignal,
+        AppStateContainer, AreaHandler, PlayingTrackInfo, VeSelectedTab,
     },
     extensions::rect::RectExtension,
     get_decorated_border,
@@ -139,20 +139,7 @@ impl AreaHandler for EffectArea {
     ) {
         let ve_selected = &mut app_state_container.ve_selected;
         let target_tab = *&ve_selected.get_focus_tab(key_code);
-
-        if *ve_selected == target_tab {
-            return;
-        }
-        *ve_selected = target_tab;
-
-        let Some(_) = app_state_container.playing_track_info else {
-            return;
-        };
-        _ = app_state_container
-            .ve_switcher_request_signal_sender
-            .send(VeSwitcherRequestSignal {
-                request_tab: target_tab,
-            });
+        _ = App::change_ve_tab(app_state_container, target_tab);
     }
 
     fn get_disp_bottom_line_text_area_selected<'a>(

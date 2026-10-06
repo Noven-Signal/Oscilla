@@ -118,11 +118,11 @@ impl AreaHandler for DurationBarArea {
             |key: u32| playing_track_info.track_duraion.as_secs_f32() * (key as f32 / 10f32);
         use crossterm::event::KeyCode::*;
         match key_code {
-            Left => App::seek_prev(app_state_container, Duration::from_secs(5)),
-            Right => App::seek_forward(app_state_container, Duration::from_secs(5)),
+            Left => _ =App::seek_prev(app_state_container, Duration::from_secs(5)),
+            Right => _ = App::seek_forward(app_state_container, Duration::from_secs(5)),
             Char(x) if matches!(x, '0'..='9') => {
                 let seek_point = calc_seek_point(x.to_digit(10).unwrap());
-                App::seek(app_state_container, Duration::from_secs_f32(seek_point));
+                _ = App::seek(app_state_container, Duration::from_secs_f32(seek_point));
             }
             _ => {}
         }

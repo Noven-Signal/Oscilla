@@ -1,4 +1,6 @@
 use tokio::sync::mpsc::unbounded_channel;
+use clap::Parser;
+
 
 use crate::{
     app::{App, AppContorlSignal, PopupObject},
@@ -26,20 +28,28 @@ mod visual_effects;
 mod widgets;
 mod key_guide;
 mod rgb_color;
+mod mcp;
+
+#[derive(Parser, Debug)]
+#[command(version, about)]
+struct Args{
+    #[arg(short, long, default_value_t = false)]
+    mcp_enabled: bool,
+
+    files: Option<Vec<String>>
+}
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     crate::errors::init()?;
     crate::logging::init()?;
 
-    let current_exe = std::env::current_exe().expect("fail to retreive executable path");
-    let current_exe_path = current_exe
-        .to_str()
-        .expect("fail to parse current executable path");
-    let filtered_args = std::env::args()
+     let args = Args::parse();
+
+    let filtered_args: Vec<_> = args.files.unwrap_or(Vec::new())
+        .into_iter()
         .filter(filter_valid_extension)
-        .filter(|arg| arg != current_exe_path)
-        .collect::<Vec<String>>();
+        .collect();
 
     let (app_control_signal_sender, app_control_signal_recv) =
         unbounded_channel::<AppContorlSignal>();
@@ -49,7 +59,8 @@ async fn main() -> color_eyre::Result<()> {
         app_control_signal_sender,
         popup_queue_signal_sender,
         filtered_args,
-    );
+        args.mcp_enabled
+    ).await;
 
     let mut app = App::new(
         AppRoot::default(),

@@ -58,10 +58,11 @@ windows = { version = "0.56", features = [
     "Win32_UI_Shell_Common",
     
 ] }
-
 rubato = "3.0.0"
-
 rand = "0.10.1"
+axum = "0.8"
+rmcp = { version = "3.5", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+schemars = "1"
 
 [build-dependencies]
 anyhow = "1.0.90"

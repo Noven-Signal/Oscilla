@@ -10,6 +10,7 @@ use crate::{
         self, NUM_OF_BLOCK_VE, OscilloscopeData, PlayerControlSignal, SeekCompleteFromVeSignal,
         UiToPlayerSeekSignal, UiVEThreadSyncSignal,
     },
+    mcp::McpServerHandler,
     shared::{SUPPORTED_EXTENSIONS, filter_valid_extension},
     tui::Tui,
     utils::array_init,
@@ -30,7 +31,11 @@ use windows::Win32::UI::Shell::{
 
 use std::{ops::Add, sync::atomic::AtomicPtr, time::Duration, usize};
 use tokio::{
-    sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    sync::{
+        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+        oneshot,
+    },
+    task::JoinHandle,
     time::Interval,
 };
 
@@ -49,6 +54,35 @@ pub struct VeSwitcherSyncSignal();
 pub enum AppContorlSignal {
     StartPlayer(usize),
     AddFilesDialogCallBack(windows::core::Result<Option<Vec<String>>>),
+}
+
+pub struct McpState {
+    pub mcp_thread: JoinHandle<Result<(), std::io::Error>>,
+    pub mcp_request_signal_recv: UnboundedReceiver<MCPRequest>,
+}
+
+pub enum McpRequestType {
+    StartPlayer,
+    PausePlayer,
+    ResumePlayer,
+    StopPlayer,
+    SeekPrev(u16),
+    SeekForward(u16),
+    PlayNext,
+    PlayPrev,
+    SetVol(u16),
+    ChangeVe(VeSelectedTab),
+    AddFiles(Vec<String>),
+}
+
+pub struct MCPRequest {
+    pub request_type: McpRequestType,
+    pub call_back_sender: oneshot::Sender<McpResult>,
+}
+
+pub enum McpResult {
+    Success,
+    Fail(String),
 }
 
 pub struct App {
@@ -116,6 +150,8 @@ impl PopupObject {
         }
     }
 }
+
+type AppManipulationResult = Result<(), String>;
 
 impl App {
     pub fn new(
@@ -205,6 +241,14 @@ impl App {
             if let Err(err) = player_result {
                 self.app_state_container.popup_object = Some(PopupObject::new(err.error_message));
             }
+        }
+
+        if let Some(McpState {
+            ref mut mcp_thread, ..
+        }) = self.app_state_container.mcp_state
+        {
+            mcp_thread.abort();
+            _ = mcp_thread.await;
         }
 
         self.tui.exit()?;
@@ -404,6 +448,18 @@ impl App {
                         self.start_player(idx);
                     }
                 },
+                Some(signal) = async {
+                    match &mut self.app_state_container.mcp_state{
+                        Some(McpState {  mcp_request_signal_recv, .. }) => mcp_request_signal_recv.recv().await,
+                        None => future::pending().await,
+                    }
+                } => {
+                    let call_back_sender = signal.call_back_sender;
+                    let result = McpServerHandler::handle_mcp_request(&mut self.app_state_container, signal.request_type);
+                    _ = call_back_sender.send(result);
+                    self.render()?;
+                }
+
             };
 
             if let (Some(ref signal), Some(_)) =
@@ -677,43 +733,43 @@ impl App {
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => Self::toggle_play_pause(&mut self.app_state_container),
+            } => _ = Self::toggle_play_pause(&mut self.app_state_container),
             KeyEvent {
                 code: KeyCode::Char(' ') | KeyCode::Char('　'),
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            } => Self::stop_player(&mut self.app_state_container, None),
+            } => _ = Self::stop_player(&mut self.app_state_container, None),
             KeyEvent {
                 code: KeyCode::Char('o'),
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            } => Self::add_new_files(&mut self.app_state_container),
+            } => _ = Self::add_new_files(&mut self.app_state_container),
             KeyEvent {
                 code: KeyCode::Left,
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            } => Self::seek_prev(&mut self.app_state_container, Duration::from_secs(5)),
+            } => _ = Self::seek_prev(&mut self.app_state_container, Duration::from_secs(5)),
             KeyEvent {
                 code: KeyCode::Right,
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            } => Self::seek_forward(&mut self.app_state_container, Duration::from_secs(5)),
+            } => _ = Self::seek_forward(&mut self.app_state_container, Duration::from_secs(5)),
             KeyEvent {
                 code: KeyCode::Up,
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            } => Self::move_vol(&mut self.app_state_container, 10),
+            } => _ = Self::move_vol(&mut self.app_state_container, 10),
             KeyEvent {
                 code: KeyCode::Down,
                 kind: KeyEventKind::Press,
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            } => Self::move_vol(&mut self.app_state_container, -10),
+            } => _ = Self::move_vol(&mut self.app_state_container, -10),
             KeyEvent {
                 code,
                 kind: KeyEventKind::Press,
@@ -768,42 +824,48 @@ impl App {
         Ok(())
     }
 
-    pub fn play_previous(app_state_container: &mut AppStateContainer) {
+    pub fn play_previous(app_state_container: &mut AppStateContainer) -> AppManipulationResult {
         let Some(idx) = app_state_container.play_state.get_now_playing_idx() else {
-            return;
+            return Err("none of track is playing".to_string());
         };
         if idx == 0 {
-            return;
+            return Err("already at the first track".to_string());
         }
-        Self::play_track(app_state_container, idx - 1);
+        _ = Self::play_track(app_state_container, idx - 1);
+
+        Result::Ok(())
     }
-    pub fn play_next(app_state_container: &mut AppStateContainer) {
+    pub fn play_next(app_state_container: &mut AppStateContainer) -> AppManipulationResult {
         let Some(idx) = app_state_container.play_state.get_now_playing_idx() else {
-            return;
+            return Err("none of track is playing".to_string());
         };
-        Self::play_track(app_state_container, idx + 1);
+        Self::play_track(app_state_container, idx + 1)
     }
 
-    pub fn play_track(app_state_container: &mut AppStateContainer, idx: usize) {
+    pub fn play_track(
+        app_state_container: &mut AppStateContainer,
+        idx: usize,
+    ) -> AppManipulationResult {
         let Some(_) = app_state_container.play_list.get(idx) else {
-            return;
+            return Err("track not found".to_string());
         };
         if app_state_container.player_thread.is_some() {
-            Self::stop_player(app_state_container, Some(idx));
+            _ = Self::stop_player(app_state_container, Some(idx));
         } else {
             _ = app_state_container
                 .app_control_signal_sender
                 .send(AppContorlSignal::StartPlayer(idx));
         };
+        Result::Ok(())
     }
 
-    pub fn pause(app_state_container: &mut AppStateContainer) {
+    pub fn pause(app_state_container: &mut AppStateContainer) -> AppManipulationResult {
         let Some(PlayerThread {
             player_control_singnal_sender,
             ..
         }) = &mut app_state_container.player_thread
         else {
-            return;
+            return Err("none of track is playing".to_string());
         };
 
         let play_state = &mut app_state_container.play_state;
@@ -811,19 +873,20 @@ impl App {
         use crate::app_state::app_state::*;
         *play_state = match play_state {
             PlayState::Playing(idx) => PlayState::Paused(*idx),
-            _ => return,
+            _ => return Err("cannot pause when no track is playing".to_string()),
         };
 
         _ = player_control_singnal_sender.send(PlayerControlSignal::Pause);
+        Result::Ok(())
     }
 
-    pub fn resume(app_state_container: &mut AppStateContainer) {
+    pub fn resume(app_state_container: &mut AppStateContainer) -> AppManipulationResult {
         let Some(PlayerThread {
             player_control_singnal_sender,
             ..
         }) = &mut app_state_container.player_thread
         else {
-            return;
+            return Err("none of track is playing".to_string());
         };
 
         let play_state = &mut app_state_container.play_state;
@@ -831,37 +894,45 @@ impl App {
         use crate::app_state::app_state::*;
         *play_state = match play_state {
             PlayState::Paused(idx) => PlayState::Playing(*idx),
-            _ => return,
+            _ => return Err("cannot resume when no track is paused".to_string()),
         };
 
         _ = player_control_singnal_sender.send(PlayerControlSignal::Resume);
+        Result::Ok(())
     }
 
-    pub fn toggle_play_pause(app_state_container: &mut AppStateContainer) {
+    pub fn toggle_play_pause(app_state_container: &mut AppStateContainer) -> AppManipulationResult {
         match app_state_container.play_state {
             PlayState::Playing(_) => Self::pause(app_state_container),
             PlayState::Paused(_) => Self::resume(app_state_container),
-            PlayState::Stopped => {}
+            PlayState::Stopped => Err("no track is playing".to_string()),
         }
     }
 
-    pub fn seek_prev(app_state_container: &mut AppStateContainer, move_amout: Duration) {
+    pub fn seek_prev(
+        app_state_container: &mut AppStateContainer,
+        move_amout: Duration,
+    ) -> AppManipulationResult {
         let Some(ref mut playing_track_info) = app_state_container.playing_track_info else {
-            return;
+            return Err("no track is playing".to_string());
         };
 
         let carib_duration = playing_track_info.get_carib_duration();
         let reqest_pos = carib_duration.saturating_sub(move_amout);
-        Self::seek(app_state_container, reqest_pos);
+        _ = Self::seek(app_state_container, reqest_pos);
+        Result::Ok(())
     }
 
-    pub fn seek_forward(app_state_container: &mut AppStateContainer, move_amout: Duration) {
+    pub fn seek_forward(
+        app_state_container: &mut AppStateContainer,
+        move_amout: Duration,
+    ) -> AppManipulationResult {
         let Some(ref mut playing_track_info) = app_state_container.playing_track_info else {
-            return;
+            return Err("no track is playing".to_string());
         };
 
         let Some(now_playing_idx) = app_state_container.play_state.get_now_playing_idx() else {
-            return;
+            return Err("no track is playing".to_string());
         };
 
         let carib_duration = if let Some(seeking_duration) = playing_track_info.seeking_duration {
@@ -877,22 +948,27 @@ impl App {
                 .get(now_playing_idx + 1)
                 .is_some()
             {
-                Self::play_next(app_state_container)
+                _ = Self::play_next(app_state_container);
             } else {
-                Self::stop_player(app_state_container, None);
+                _ = Self::stop_player(app_state_container, None);
             }
-            return;
+            return Err("cannot seek forward".to_string());
         }
 
-        Self::seek(app_state_container, reqest_pos);
+        _ = Self::seek(app_state_container, reqest_pos);
+
+        Result::Ok(())
     }
 
-    pub fn seek(app_state_container: &mut AppStateContainer, reqest_pos: Duration) {
+    pub fn seek(
+        app_state_container: &mut AppStateContainer,
+        reqest_pos: Duration,
+    ) -> AppManipulationResult {
         let Some(ref mut playing_track_info) = app_state_container.playing_track_info else {
-            return;
+            return Err("no track is playing".to_string());
         };
         if let Some(PlayerRequestState::VeSwitching) = app_state_container.player_request_state {
-            return;
+            return Err("cannot seek while switching visual effects".to_string());
         }
 
         let Some(PlayerThread {
@@ -900,7 +976,7 @@ impl App {
             ..
         }) = app_state_container.player_thread
         else {
-            return;
+            return Err("no track is playing".to_string());
         };
         let new_seek_no = app_state_container.seek_no.add(1);
         app_state_container.seek_no = new_seek_no;
@@ -913,35 +989,45 @@ impl App {
             target_duration: reqest_pos,
             seek_no: new_seek_no,
         }));
+        Result::Ok(())
     }
 
     pub fn stop_player(
         app_state_container: &mut AppStateContainer,
         wait_next_tack_idx: Option<usize>,
-    ) {
+    ) -> AppManipulationResult {
         let Some(PlayerThread {
             ref player_control_singnal_sender,
             ..
         }) = app_state_container.player_thread
         else {
-            return;
+            return Err("no track is playing".to_string());
         };
         app_state_container.wait_next_tack_idx = wait_next_tack_idx;
         app_state_container.ve_channel = None;
         _ = player_control_singnal_sender.send(PlayerControlSignal::Stop);
+        Result::Ok(())
     }
 
-    pub fn move_vol(app_state_container: &mut AppStateContainer, move_quantity: i16) {
+    pub fn move_vol(
+        app_state_container: &mut AppStateContainer,
+        move_quantity: i16,
+    ) -> AppManipulationResult {
         let after = app_state_container.vol_state as i16 + move_quantity;
         let after = match after {
             ..=0 => 0,
             100.. => 100,
             x => x,
         };
-        Self::set_vol(app_state_container, after as u16);
+        _ = Self::set_vol(app_state_container, after as u16);
+
+        Result::Ok(())
     }
 
-    pub fn set_vol(app_state_container: &mut AppStateContainer, set_vol: u16) {
+    pub fn set_vol(
+        app_state_container: &mut AppStateContainer,
+        set_vol: u16,
+    ) -> AppManipulationResult {
         app_state_container.vol_state = set_vol;
 
         if let Some(PlayerThread {
@@ -951,14 +1037,38 @@ impl App {
         {
             _ = player_control_singnal_sender.send(PlayerControlSignal::SetVol(set_vol));
         };
+        Result::Ok(())
     }
 
-    pub fn add_new_files(app_state_container: &mut AppStateContainer) {
+    pub fn change_ve_tab(
+        app_state_container: &mut AppStateContainer,
+        target_tab: VeSelectedTab,
+    ) -> AppManipulationResult {
+        let ve_selected = &mut app_state_container.ve_selected;
+        if *ve_selected == target_tab {
+            return Result::Ok(());
+        }
+        *ve_selected = target_tab;
+
+        let Some(_) = app_state_container.playing_track_info else {
+            return Result::Ok(());
+        };
+        _ = app_state_container
+            .ve_switcher_request_signal_sender
+            .send(VeSwitcherRequestSignal {
+                request_tab: target_tab,
+            });
+        Result::Ok(())
+    }
+
+    pub fn add_new_files(app_state_container: &mut AppStateContainer) -> Result<(), String> {
         let app_control_signal_sender = app_state_container.app_control_signal_sender.clone();
         tokio::task::spawn_blocking(move || {
             let added_files = Self::select_multiple_files();
             app_control_signal_sender.send(AppContorlSignal::AddFilesDialogCallBack(added_files))
         });
+
+        Result::Ok(())
     }
 
     fn add_newfiles_callback(
@@ -967,24 +1077,7 @@ impl App {
     ) {
         use core::result::Result::*;
         match added_files {
-            Ok(Some(files)) => {
-                let popup_queue_sender = app_state_container.popup_queue_signal_sender.clone();
-                let mut audio_file_info_list =
-                    AppStateContainer::validate_audio_file_and_create_audio_file_info_list(
-                        files,
-                        popup_queue_sender,
-                    );
-                let playlist = &mut app_state_container.play_list;
-                let append_before_playlist_len = playlist.len();
-
-                playlist.append(&mut audio_file_info_list);
-
-                if append_before_playlist_len == 0 {
-                    _ = app_state_container
-                        .app_control_signal_sender
-                        .send(AppContorlSignal::StartPlayer(0));
-                }
-            }
+            Ok(Some(files)) => _ = Self::add_new_files_proc(app_state_container, files),
             Ok(None) => {}
             Err(_) => {
                 app_state_container.popup_object = Some(PopupObject::new(
@@ -992,6 +1085,29 @@ impl App {
                 ))
             }
         }
+    }
+
+    pub fn add_new_files_proc(
+        app_state_container: &mut AppStateContainer,
+        files: Vec<String>,
+    ) -> AppManipulationResult {
+        let popup_queue_sender = app_state_container.popup_queue_signal_sender.clone();
+        let mut audio_file_info_list =
+            AppStateContainer::validate_audio_file_and_create_audio_file_info_list(
+                files,
+                popup_queue_sender,
+            );
+        let playlist = &mut app_state_container.play_list;
+        let append_before_playlist_len = playlist.len();
+
+        playlist.append(&mut audio_file_info_list);
+
+        if append_before_playlist_len == 0 {
+            _ = app_state_container
+                .app_control_signal_sender
+                .send(AppContorlSignal::StartPlayer(0));
+        }
+        Result::Ok(())
     }
 
     fn select_multiple_files() -> windows::core::Result<Option<Vec<String>>> {

@@ -1,7 +1,8 @@
 pub mod app_state {
-    use crate::app::{AppContorlSignal, PlayerRequestState, PopupObject, Ves};
+    use crate::app::{AppContorlSignal, McpState, PlayerRequestState, PopupObject, Ves};
     use crate::audio_file_info::AudioFileInfo;
     use crate::manipulation::{PlayerControlSignal, PlayerExecutorError, VESharedBuffer};
+    use crate::mcp::McpServerHandler;
     use crate::widgets::button::{ButtonIdent, PlayButtonState};
 
     use crate::get_area_handler_fn;
@@ -10,12 +11,18 @@ pub mod app_state {
     use ratatui::layout::Rect;
     use ratatui::text::Line;
     use ratatui::widgets::{ListState, Widget};
+    use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+    use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
+    use schemars::JsonSchema;
+    use serde::Deserialize;
     use std::fmt::Debug;
     use std::pin::Pin;
     use std::slice::Iter;
+    use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
     use tokio::task::JoinHandle;
+    use tracing::info;
 
     #[derive(Clone, Copy, Debug)]
     pub enum TabState {
@@ -227,7 +234,7 @@ pub mod app_state {
         }
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, JsonSchema)]
     pub enum VeSelectedTab {
         Off,
         Oscilloscope,
@@ -302,13 +309,15 @@ pub mod app_state {
         pub player_request_state: Option<PlayerRequestState>,
         pub popup_object: Option<PopupObject>,
         pub popup_queue_signal_sender: UnboundedSender<PopupObject>,
+        pub mcp_state: Option<McpState>,
     }
 
     impl AppStateContainer {
-        pub fn new(
+        pub async fn new(
             app_control_signal_sender: UnboundedSender<AppContorlSignal>,
             popup_queue_signal_sender: UnboundedSender<PopupObject>,
             list: Vec<String>,
+            mcp_enabled: bool,
         ) -> Self {
             let (ve_switcher_request_signal_sender, ve_switcher_request_signal_recv) =
                 unbounded_channel();
@@ -317,6 +326,36 @@ pub mod app_state {
                 list,
                 popup_queue_signal_sender.clone(),
             );
+
+            let mcp_state = if mcp_enabled {
+                let (mcp_request_signal_sender, mcp_request_signal_recv) = unbounded_channel();
+                let mcp_thread = tokio::spawn(async move {
+                    let service = StreamableHttpService::new(
+                        move || {
+                            Ok(McpServerHandler {
+                                mcp_request_signal_sender: mcp_request_signal_sender.clone(),
+                            })
+                        },
+                        Arc::new(LocalSessionManager::default()),
+                        StreamableHttpServerConfig::default(),
+                    );
+
+                    let app = axum::Router::new().route_service("/mcp", service);
+                    let listener = tokio::net::TcpListener::bind("127.0.0.1:8000").await?;
+
+                    info!("MCP server listening at http://127.0.0.1:8000/mcp");
+                    axum::serve(listener, app).await?;
+
+                    Ok(())
+                });
+
+                Some(McpState {
+                    mcp_thread,
+                    mcp_request_signal_recv
+                })
+            } else {
+                None
+            };
 
             Self {
                 focus_state: TabState::None,
@@ -339,6 +378,7 @@ pub mod app_state {
                 player_request_state: None,
                 popup_object: None,
                 popup_queue_signal_sender,
+                mcp_state,
             }
         }
 
