@@ -37,6 +37,10 @@ macro_rules! get_area_handler_fn {
             $crate::app_state::app_state::Tabs::VolArea => {
                 $crate::handle_key_via_trait!($crate::widgets::vol_area::VolArea, $ident)
             }
+            #[cfg(feature="mcp")]
+            $crate::app_state::app_state::Tabs::McpServerArea => {
+                $crate::handle_key_via_trait!($crate::widgets::mcp_server_area::McpServerArea, $ident)
+            }
         }
     };
 }

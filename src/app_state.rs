@@ -1,10 +1,9 @@
 pub mod app_state {
-    use crate::app::{AppContorlSignal, PlayerRequestState, PopupObject, Ves};
     use crate::app::McpState;
+    use crate::app::{AppContorlSignal, PlayerRequestState, PopupObject, Ves};
     use crate::audio_file_info::AudioFileInfo;
     use crate::manipulation::{PlayerControlSignal, PlayerExecutorError, VESharedBuffer};
-    #[cfg(feature = "mcp")]
-    use crate::mcp::McpServerHandler;
+
     use crate::widgets::button::{ButtonIdent, PlayButtonState};
 
     use crate::get_area_handler_fn;
@@ -15,8 +14,6 @@ pub mod app_state {
     use ratatui::widgets::{ListState, Widget};
     #[cfg(feature = "mcp")]
     mod mcp_imports {
-        pub use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
-        pub use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
         pub use schemars::JsonSchema;
     }
     #[cfg(feature = "mcp")]
@@ -26,13 +23,10 @@ pub mod app_state {
     use std::fmt::Debug;
     use std::pin::Pin;
     use std::slice::Iter;
-    #[cfg(feature = "mcp")]
-    use std::sync::Arc;
+
     use std::time::Duration;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
     use tokio::task::JoinHandle;
-    #[cfg(feature = "mcp")]
-    use tracing::info;
 
     #[derive(Clone, Copy, Debug)]
     pub enum TabState {
@@ -73,6 +67,8 @@ pub mod app_state {
         DurationBarArea,
         ButtonsArea,
         VolArea,
+        #[cfg(feature = "mcp")]
+        McpServerArea,
     }
 
     impl Tabs {
@@ -101,13 +97,30 @@ pub mod app_state {
                     up: Some(DurationBarArea),
                     down: None,
                     left: None,
-                    right: Some(VolArea),
+                    right: match () {
+                        #[cfg(feature = "mcp")]
+                        _ => Some(McpServerArea),
+                        #[cfg(not(feature = "mcp"))]
+                        _ => Some(VolArea),
+                    },
                 },
                 VolArea => NextZone {
                     up: Some(DurationBarArea),
                     down: None,
-                    left: Some(ButtonsArea),
+                    left: match () {
+                        #[cfg(feature = "mcp")]
+                        _ => Some(McpServerArea),
+                        #[cfg(not(feature = "mcp"))]
+                        _ => Some(ButtonsArea),
+                    },
                     right: None,
+                },
+                #[cfg(feature = "mcp")]
+                McpServerArea => NextZone {
+                    up: Some(DurationBarArea),
+                    down: None,
+                    left: Some(ButtonsArea),
+                    right: Some(VolArea),
                 },
             }
         }
@@ -321,6 +334,8 @@ pub mod app_state {
         pub popup_object: Option<PopupObject>,
         pub popup_queue_signal_sender: UnboundedSender<PopupObject>,
         pub mcp_state: Option<McpState>,
+        #[cfg_attr(not(feature = "mcp"), allow(dead_code))]
+        pub mcp_server_port: u16,
     }
 
     impl AppStateContainer {
@@ -329,6 +344,7 @@ pub mod app_state {
             popup_queue_signal_sender: UnboundedSender<PopupObject>,
             list: Vec<String>,
             mcp_enabled: bool,
+            mcp_server_port: u16,
         ) -> Self {
             let (ve_switcher_request_signal_sender, ve_switcher_request_signal_recv) =
                 unbounded_channel();
@@ -338,37 +354,10 @@ pub mod app_state {
                 popup_queue_signal_sender.clone(),
             );
             #[cfg(feature = "mcp")]
-            let mcp_state = if mcp_enabled {
-                let (mcp_request_signal_sender, mcp_request_signal_recv) = unbounded_channel();
-                let mcp_thread = tokio::spawn(async move {
-                    let service = StreamableHttpService::new(
-                        move || {
-                            Ok(McpServerHandler {
-                                mcp_request_signal_sender: mcp_request_signal_sender.clone(),
-                            })
-                        },
-                        Arc::new(LocalSessionManager::default()),
-                        StreamableHttpServerConfig::default(),
-                    );
+            if mcp_enabled {
+                _ = app_control_signal_sender.send(AppContorlSignal::McpServerStart);
+            }
 
-                    let app = axum::Router::new().route_service("/mcp", service);
-                    let listener = tokio::net::TcpListener::bind("127.0.0.1:8000").await?;
-
-                    info!("MCP server listening at http://127.0.0.1:8000/mcp");
-                    axum::serve(listener, app).await?;
-
-                    Ok(())
-                });
-
-                Some(McpState {
-                    mcp_thread,
-                    mcp_request_signal_recv,
-                })
-            } else {
-                None
-            };
-            #[cfg(not(feature = "mcp"))]
-            let mcp_state = None;
             #[cfg(not(feature = "mcp"))]
             let _ = mcp_enabled;
 
@@ -393,7 +382,8 @@ pub mod app_state {
                 player_request_state: None,
                 popup_object: None,
                 popup_queue_signal_sender,
-                mcp_state,
+                mcp_state: None,
+                mcp_server_port,
             }
         }
 

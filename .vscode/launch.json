@@ -15,7 +15,9 @@
                 ]
             },
             "args": [
-                "--mcp-enabled"
+                // "--mcp-enabled",
+                // "--mcp-server-port",
+                // "8000"
             ],
             "env": {
                 "log_dir": "log"

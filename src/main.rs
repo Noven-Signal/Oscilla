@@ -8,6 +8,8 @@ use crate::{
     widgets::app_root::*,
 };
 
+use shared::MCP_DEFAULT_PORT;
+
 mod app;
 mod app_state;
 mod audio_decoder;
@@ -33,8 +35,13 @@ mod widgets;
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
-    #[arg(short, long, default_value_t = false)]
+    #[cfg(feature = "mcp")]
+    #[arg(long, default_value_t = false)]
     mcp_enabled: bool,
+
+    #[cfg(feature = "mcp")]
+    #[arg(long, default_value_t = MCP_DEFAULT_PORT)]
+    mcp_server_port: u16,
 
     files: Option<Vec<String>>,
 }
@@ -57,11 +64,26 @@ async fn main() -> color_eyre::Result<()> {
         unbounded_channel::<AppContorlSignal>();
     let (popup_queue_signal_sender, popup_queue_signal_recv) = unbounded_channel::<PopupObject>();
 
+    let mcp_enabled = match () {
+        #[cfg(feature = "mcp")]
+        _ => args.mcp_enabled,
+        #[cfg(not(feature = "mcp"))]
+        _ => false,
+    };
+
+    let mcp_server_port = match () {
+        #[cfg(feature = "mcp")]
+        _ => args.mcp_server_port,
+        #[cfg(not(feature = "mcp"))]
+        _ => MCP_DEFAULT_PORT, //dummy,
+    };
+
     let app_state_container = AppStateContainer::new(
         app_control_signal_sender,
         popup_queue_signal_sender,
         filtered_args,
-        args.mcp_enabled,
+        mcp_enabled,
+        mcp_server_port,
     )
     .await;
 

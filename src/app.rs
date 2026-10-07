@@ -24,6 +24,8 @@ use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use futures::{FutureExt, StreamExt, future};
 use ratatui::{prelude::Rect, widgets::StatefulWidget};
 use tracing::debug;
+#[cfg(feature = "mcp")]
+use tracing::info;
 use windows::Win32::Foundation::ERROR_CANCELLED;
 
 use windows::Win32::UI::Shell::{
@@ -31,7 +33,9 @@ use windows::Win32::UI::Shell::{
     SIGDN_FILESYSPATH,
 };
 
+
 use std::{ops::Add, sync::atomic::AtomicPtr, time::Duration, usize};
+
 use tokio::{
     sync::{
         mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
@@ -40,6 +44,14 @@ use tokio::{
     task::JoinHandle,
     time::Interval,
 };
+
+#[cfg(feature = "mcp")]
+mod mcp_imports {
+    pub use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+    pub use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
+}
+#[cfg(feature = "mcp")]
+use mcp_imports::*;
 
 pub struct Ves {
     pub ui_to_ve_signal_sender: UnboundedSender<UiVEThreadSyncSignal>,
@@ -56,10 +68,18 @@ pub struct VeSwitcherSyncSignal();
 pub enum AppContorlSignal {
     StartPlayer(usize),
     AddFilesDialogCallBack(windows::core::Result<Option<Vec<String>>>),
+    #[cfg(feature = "mcp")]
+    McpServerStart,
+    #[cfg(feature = "mcp")]
+    McpServerToggle,
+    #[cfg(feature = "mcp")]
+    McpServerStartedNotification,
+    #[cfg(feature = "mcp")]
+    McpServerStartFail(String),
 }
 #[cfg_attr(not(feature = "mcp"), allow(dead_code))]
 pub struct McpState {
-    pub mcp_thread: JoinHandle<Result<(), std::io::Error>>,
+    pub mcp_thread: JoinHandle<()>,
     pub mcp_request_signal_recv: UnboundedReceiver<MCPRequest>,
 }
 
@@ -360,6 +380,33 @@ impl App {
                             Self::add_newfiles_callback(&mut self.app_state_container, res);
                             self.render()?;
                         }
+                        #[cfg(feature = "mcp")]
+                        AppContorlSignal::McpServerStart => {
+                            Self::start_mcp_server(&mut self.app_state_container).await;
+                        }
+                        #[cfg(feature = "mcp")]
+                        AppContorlSignal::McpServerToggle => {
+                            Self::toggle_mcp_server(&mut self.app_state_container).await;
+                        }
+                        #[cfg(feature = "mcp")]
+                        AppContorlSignal::McpServerStartedNotification => {
+                            self.render()?;
+                        },
+                        #[cfg(feature = "mcp")]
+                        AppContorlSignal::McpServerStartFail(message) => {
+                            let popup = PopupObject {
+                                title: "MCP Server Start Failed".to_owned(),
+                                message,
+                                button_name: "OK".to_owned()
+                            };
+
+                            if let Some(McpState { ref mut mcp_thread, .. }) = self.app_state_container.mcp_state {
+                            _ = mcp_thread.await;
+                            }
+                            self.app_state_container.mcp_state = None;
+
+                            _ = self.app_state_container.popup_queue_signal_sender.send(popup);
+                        },
                     }
                 }
                 Some(signal) = async{
@@ -782,6 +829,13 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => _ = Self::move_vol(&mut self.app_state_container, -10),
+            #[cfg(feature = "mcp")]
+            KeyEvent {
+                code: KeyCode::Char('m'),
+                kind: KeyEventKind::Press,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Self::toggle_mcp_server(&mut self.app_state_container).await,
             KeyEvent {
                 code,
                 kind: KeyEventKind::Press,
@@ -1176,6 +1230,64 @@ impl App {
             CoUninitialize();
             ret
         }
+    }
+
+    #[cfg(feature = "mcp")]
+    pub async fn toggle_mcp_server(app_state_container: &mut AppStateContainer) {
+        if let Some(McpState {
+            ref mut mcp_thread, ..
+        }) = app_state_container.mcp_state
+        {
+            mcp_thread.abort();
+            _ = mcp_thread.await;
+            app_state_container.mcp_state = None;
+        } else {
+            Self::start_mcp_server(app_state_container).await;
+        }
+    }
+
+    #[cfg(feature = "mcp")]
+    pub async fn start_mcp_server(app_state_container: &mut AppStateContainer) {
+        let (mcp_request_signal_sender, mcp_request_signal_recv) = unbounded_channel();
+        let app_control_signal_sender = app_state_container.app_control_signal_sender.clone();
+        let port = app_state_container.mcp_server_port;
+        let mcp_thread = tokio::spawn(async move {
+            let proc = async || -> Result<(), std::io::Error> {
+                use std::sync::Arc;
+
+                let service = StreamableHttpService::new(
+                    move || {
+                        Result::Ok(McpServerHandler {
+                            mcp_request_signal_sender: mcp_request_signal_sender.clone(),
+                        })
+                    },
+                    Arc::new(LocalSessionManager::default()),
+                    StreamableHttpServerConfig::default(),
+                );
+
+                let app = axum::Router::new().route_service("/mcp", service);
+
+                let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
+
+                info!("MCP server listening at http://127.0.0.1:{port}/mcp");
+
+                _ = app_control_signal_sender.send(AppContorlSignal::McpServerStartedNotification);
+
+                axum::serve(listener, app).await?;
+                info!("MCP server exit");
+                Result::Ok(())
+            };
+
+            if let Err(err) = proc().await {
+                _ = app_control_signal_sender
+                    .send(AppContorlSignal::McpServerStartFail(err.to_string()));
+            }
+        });
+
+        app_state_container.mcp_state = Some(McpState {
+            mcp_thread,
+            mcp_request_signal_recv,
+        });
     }
 
     async fn handle_crossterm_event(&mut self, event: &CrosstermEvent) -> color_eyre::Result<()> {

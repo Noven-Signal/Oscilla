@@ -8,6 +8,10 @@ use crate::{
     rgb_color,
 };
 
+#[cfg(feature="mcp")]
+use crate::shared::is_mcp_is_enabled;
+ 
+
 #[derive(Clone, Copy)]
 pub struct KeyGuide<'a> {
     pub key: &'a str,
@@ -48,14 +52,27 @@ impl<'a> KeyGuide<'a> {
             PlayState::Paused(_) => vec![
                 KeyGuide::new_mazenta_gray("Space", "Resume"),
                 KeyGuide::new_mazenta_gray("Ctrl+Space", "Stop"),
-                KeyGuide::new_mazenta_gray("Ctrl+←/→", "Rewind/forward 5sec"),
+                KeyGuide::new_mazenta_gray("Ctrl+←/→", "Rewind/Forward 5sec"),
             ],
             PlayState::Stopped => vec![],
         };
 
+        #[cfg(feature = "mcp")]
+        let mcp_toggle_guide =  [KeyGuide::new_mazenta_gray(
+                "Ctrl+M",
+                if is_mcp_is_enabled(app_state_container) {
+                    "Shutdown MCP server"
+                } else {
+                    "turn on MCP server"
+                },
+            )];
+        #[cfg(not(feature = "mcp"))]
+        let mcp_toggle_guide = [];
+
         space_guide
             .into_iter()
             .chain(KeyGuide::GLOBAL_GUIDES)
+            .chain(mcp_toggle_guide)
             .collect()
     }
 
