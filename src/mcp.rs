@@ -2,10 +2,7 @@ use std::time::Duration;
 
 use rmcp::{handler::server::wrapper::Parameters, schemars::JsonSchema, tool, tool_router};
 use serde::Deserialize;
-use tokio::sync::{
-    mpsc::{UnboundedSender},
-    oneshot,
-};
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use crate::{
     app::{App, MCPRequest, McpRequestType, McpResult},
@@ -40,7 +37,7 @@ pub struct McpServerHandler {
 }
 
 impl McpServerHandler {
-    async fn handle_request(&self, mcp_request_type: McpRequestType)->String {
+    async fn handle_request(&self, mcp_request_type: McpRequestType) -> String {
         let (call_back_sender, call_back_sender_recv) = oneshot::channel();
         let res = self.mcp_request_signal_sender.send(MCPRequest {
             request_type: mcp_request_type,
@@ -61,11 +58,11 @@ impl McpServerHandler {
 impl McpServerHandler {
     #[tool(description = "Play")]
     async fn play(&self, _input: Parameters<EmptyParam>) -> String {
-       self.handle_request(McpRequestType::StartPlayer).await
+        self.handle_request(McpRequestType::StartPlayer).await
     }
     #[tool(description = "Pause")]
     async fn pause(&self, _input: Parameters<EmptyParam>) -> String {
-       self.handle_request(McpRequestType::PausePlayer).await
+        self.handle_request(McpRequestType::PausePlayer).await
     }
     #[tool(description = "Resume")]
     async fn resume(&self, _input: Parameters<EmptyParam>) -> String {
@@ -73,16 +70,18 @@ impl McpServerHandler {
     }
     #[tool(description = "Stop playing")]
     async fn stop(&self, _input: Parameters<EmptyParam>) -> String {
-       self.handle_request(McpRequestType::StopPlayer).await
+        self.handle_request(McpRequestType::StopPlayer).await
     }
     #[tool(description = "Seek Rewind(specify move second)")]
     async fn seek_prev(&self, input: Parameters<SeekParam>) -> String {
-       self.handle_request(McpRequestType::SeekPrev(input.0.move_amout)).await
+        self.handle_request(McpRequestType::SeekPrev(input.0.move_amout))
+            .await
     }
 
     #[tool(description = "Seek Forward(specify move second)")]
     async fn seek_forward(&self, input: Parameters<SeekParam>) -> String {
-      self.handle_request(McpRequestType::SeekForward(input.0.move_amout)).await
+        self.handle_request(McpRequestType::SeekForward(input.0.move_amout))
+            .await
     }
 
     #[tool(description = "Play next track")]
@@ -95,21 +94,24 @@ impl McpServerHandler {
     }
     #[tool(description = "set volume range of 0 to 100")]
     async fn set_vol(&self, input: Parameters<SetVolParam>) -> String {
-        self.handle_request(McpRequestType::SetVol(input.0.vol)).await
+        self.handle_request(McpRequestType::SetVol(input.0.vol))
+            .await
     }
-    
+
     #[tool(
         description = "enable/disable or switch visual effect.currently only oscilloscope is available"
     )]
     async fn change_ve(&self, input: Parameters<ChangeVeParam>) -> String {
-        self.handle_request(McpRequestType::ChangeVe(input.0.ve)).await
+        self.handle_request(McpRequestType::ChangeVe(input.0.ve))
+            .await
     }
 
     #[tool(
         description = "Add audio files. Supported extensions: aif, aiff, caf, mp4, m4a, m4p, m4b, m4r, m4v, mov, mkv, webm, ogg, wav, aac, flac, mp1, mp2, mp3, mpa, opus, wv"
     )]
     async fn add_files(&self, input: Parameters<AddFilesParam>) -> String {
-       self.handle_request(McpRequestType::AddFiles(input.0.files_path)).await
+        self.handle_request(McpRequestType::AddFiles(input.0.files_path))
+            .await
     }
 }
 

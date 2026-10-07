@@ -1,3 +1,5 @@
+#[cfg(feature = "mcp")]
+use crate::mcp::McpServerHandler;
 use crate::{
     app_state::{
         self,
@@ -10,12 +12,12 @@ use crate::{
         self, NUM_OF_BLOCK_VE, OscilloscopeData, PlayerControlSignal, SeekCompleteFromVeSignal,
         UiToPlayerSeekSignal, UiVEThreadSyncSignal,
     },
-    mcp::McpServerHandler,
     shared::{SUPPORTED_EXTENSIONS, filter_valid_extension},
     tui::Tui,
     utils::array_init,
     widgets::{app_root::AppRoot, popup::Popup},
 };
+
 use color_eyre::eyre::Ok;
 use crossterm::event::Event as CrosstermEvent;
 use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -55,12 +57,13 @@ pub enum AppContorlSignal {
     StartPlayer(usize),
     AddFilesDialogCallBack(windows::core::Result<Option<Vec<String>>>),
 }
-
+#[cfg_attr(not(feature = "mcp"), allow(dead_code))]
 pub struct McpState {
     pub mcp_thread: JoinHandle<Result<(), std::io::Error>>,
     pub mcp_request_signal_recv: UnboundedReceiver<MCPRequest>,
 }
 
+#[cfg_attr(not(feature = "mcp"), allow(dead_code))]
 pub enum McpRequestType {
     StartPlayer,
     PausePlayer,
@@ -74,12 +77,12 @@ pub enum McpRequestType {
     ChangeVe(VeSelectedTab),
     AddFiles(Vec<String>),
 }
-
+#[cfg_attr(not(feature = "mcp"), allow(dead_code))]
 pub struct MCPRequest {
     pub request_type: McpRequestType,
     pub call_back_sender: oneshot::Sender<McpResult>,
 }
-
+#[cfg_attr(not(feature = "mcp"), allow(dead_code))]
 pub enum McpResult {
     Success,
     Fail(String),
@@ -243,6 +246,7 @@ impl App {
             }
         }
 
+        #[cfg(feature = "mcp")]
         if let Some(McpState {
             ref mut mcp_thread, ..
         }) = self.app_state_container.mcp_state
@@ -450,14 +454,22 @@ impl App {
                 },
                 Some(signal) = async {
                     match &mut self.app_state_container.mcp_state{
+                        #[cfg(feature = "mcp")]
                         Some(McpState {  mcp_request_signal_recv, .. }) => mcp_request_signal_recv.recv().await,
-                        None => future::pending().await,
+                        _ => future::pending::<Option<MCPRequest>>().await,
                     }
                 } => {
-                    let call_back_sender = signal.call_back_sender;
-                    let result = McpServerHandler::handle_mcp_request(&mut self.app_state_container, signal.request_type);
-                    _ = call_back_sender.send(result);
-                    self.render()?;
+                    #[cfg(feature = "mcp")]
+                    {
+                        let call_back_sender = signal.call_back_sender;
+                        let result = McpServerHandler::handle_mcp_request(&mut self.app_state_container, signal.request_type);
+                        _ = call_back_sender.send(result);
+                        self.render()?;
+                    };
+                    #[cfg(not(feature = "mcp"))]
+                    {
+                        let _ = signal;
+                    };
                 }
 
             };

@@ -60,9 +60,14 @@ windows = { version = "0.56", features = [
 ] }
 rubato = "3.0.0"
 rand = "0.10.1"
-axum = "0.8"
-rmcp = { version = "3.5", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
-schemars = "1"
+
+axum = { version = "0.8", optional = true }
+rmcp = { version = "3.5", features = ["server", "macros", "schemars", "transport-streamable-http-server"], optional = true }
+schemars = { version = "1", optional = true }
+
+[features]
+default = ["mcp"]
+mcp = ["dep:axum", "dep:rmcp", "dep:schemars"]
 
 [build-dependencies]
 anyhow = "1.0.90"

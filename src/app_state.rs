@@ -1,7 +1,9 @@
 pub mod app_state {
-    use crate::app::{AppContorlSignal, McpState, PlayerRequestState, PopupObject, Ves};
+    use crate::app::{AppContorlSignal, PlayerRequestState, PopupObject, Ves};
+    use crate::app::McpState;
     use crate::audio_file_info::AudioFileInfo;
     use crate::manipulation::{PlayerControlSignal, PlayerExecutorError, VESharedBuffer};
+    #[cfg(feature = "mcp")]
     use crate::mcp::McpServerHandler;
     use crate::widgets::button::{ButtonIdent, PlayButtonState};
 
@@ -11,17 +13,25 @@ pub mod app_state {
     use ratatui::layout::Rect;
     use ratatui::text::Line;
     use ratatui::widgets::{ListState, Widget};
-    use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
-    use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
-    use schemars::JsonSchema;
+    #[cfg(feature = "mcp")]
+    mod mcp_imports {
+        pub use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+        pub use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
+        pub use schemars::JsonSchema;
+    }
+    #[cfg(feature = "mcp")]
+    use mcp_imports::*;
+
     use serde::Deserialize;
     use std::fmt::Debug;
     use std::pin::Pin;
     use std::slice::Iter;
+    #[cfg(feature = "mcp")]
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
     use tokio::task::JoinHandle;
+    #[cfg(feature = "mcp")]
     use tracing::info;
 
     #[derive(Clone, Copy, Debug)]
@@ -234,7 +244,8 @@ pub mod app_state {
         }
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, JsonSchema)]
+    #[cfg_attr(feature = "mcp", derive(JsonSchema))]
+    #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
     pub enum VeSelectedTab {
         Off,
         Oscilloscope,
@@ -326,7 +337,7 @@ pub mod app_state {
                 list,
                 popup_queue_signal_sender.clone(),
             );
-
+            #[cfg(feature = "mcp")]
             let mcp_state = if mcp_enabled {
                 let (mcp_request_signal_sender, mcp_request_signal_recv) = unbounded_channel();
                 let mcp_thread = tokio::spawn(async move {
@@ -351,11 +362,15 @@ pub mod app_state {
 
                 Some(McpState {
                     mcp_thread,
-                    mcp_request_signal_recv
+                    mcp_request_signal_recv,
                 })
             } else {
                 None
             };
+            #[cfg(not(feature = "mcp"))]
+            let mcp_state = None;
+            #[cfg(not(feature = "mcp"))]
+            let _ = mcp_enabled;
 
             Self {
                 focus_state: TabState::None,

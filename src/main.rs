@@ -1,6 +1,5 @@
-use tokio::sync::mpsc::unbounded_channel;
 use clap::Parser;
-
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
     app::{App, AppContorlSignal, PopupObject},
@@ -17,26 +16,27 @@ mod audio_output;
 mod decoder_wrapper;
 mod errors;
 mod extensions;
+mod key_guide;
 mod logging;
 mod manipulation;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod my_def_macro;
 mod resampler_wrapper;
+mod rgb_color;
 mod shared;
 mod tui;
 mod utils;
 mod visual_effects;
 mod widgets;
-mod key_guide;
-mod rgb_color;
-mod mcp;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
-struct Args{
+struct Args {
     #[arg(short, long, default_value_t = false)]
     mcp_enabled: bool,
 
-    files: Option<Vec<String>>
+    files: Option<Vec<String>>,
 }
 
 #[tokio::main]
@@ -44,9 +44,11 @@ async fn main() -> color_eyre::Result<()> {
     crate::errors::init()?;
     crate::logging::init()?;
 
-     let args = Args::parse();
+    let args = Args::parse();
 
-    let filtered_args: Vec<_> = args.files.unwrap_or(Vec::new())
+    let filtered_args: Vec<_> = args
+        .files
+        .unwrap_or(Vec::new())
         .into_iter()
         .filter(filter_valid_extension)
         .collect();
@@ -59,8 +61,9 @@ async fn main() -> color_eyre::Result<()> {
         app_control_signal_sender,
         popup_queue_signal_sender,
         filtered_args,
-        args.mcp_enabled
-    ).await;
+        args.mcp_enabled,
+    )
+    .await;
 
     let mut app = App::new(
         AppRoot::default(),
